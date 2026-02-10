@@ -1,0 +1,27 @@
+.idea/
+__pycache__/
+build/
+dist/
+data/
+data-en/
+data-zh/
+log/
+test*.py
+dataset/
+audio_db/
+output/
+models/
+feature_models/
+paper.md
+# Ignore VSCode settings
+.vscode/
+uv.lock
+.venv/
+logs/
+*.tar
+outputs/
+*.txt
+*bin/
+Fun-ASR-Nano-2512
+fun_asr_gguf/bin
+model

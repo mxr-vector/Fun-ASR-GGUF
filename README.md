@@ -23,7 +23,8 @@
 推理需要：
 
 ```bash
-pip install -r requirements.txt
+uv sync --extra cu130
+uv pip install transformers modelscope
 ```
 
 >  `pydub` 用于音频格式转换，需要系统安装 [ffmpeg](https://ffmpeg.org/download.html)
@@ -52,13 +53,13 @@ modelscope download --model FunAudioLLM/Fun-ASR-Nano-2512 --local_dir ./Fun-ASR-
 
 ```bash
 # 导出 Encoder (FP32) + CTC Decoder (FP32)
-python 01-Export-Encoder-Adaptor-CTC.py
+uv run 01-Export-Encoder-Adaptor-CTC.py
 
 # 将 onnx 量化为 fp16 和 int8
-python 02-Quantize-ONNX.py
+uv run 02-Quantize-ONNX.py
 
 # 导出 LLM Decoder (INT8)
-python 03-Export-Decoder-GGUF.py
+uv run 03-Export-Decoder-GGUF.py
 ```
 
 ### 3. 运行识别

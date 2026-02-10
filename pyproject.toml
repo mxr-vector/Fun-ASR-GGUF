@@ -1,0 +1,95 @@
+[project]
+name = "fun-asr-gguf"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gguf>=0.17.1",
+    "numpy>=2.4.2",
+    "onnx>=1.20.1",
+    "onnxruntime>=1.24.1",
+    "onnxscript>=0.6.1",
+    "pydub>=0.25.1",
+    "pypinyin>=0.55.0",
+    "rich>=14.3.2",
+    "sentencepiece>=0.2.1",
+    "srt>=3.5.3",
+    "watchdog>=6.0.0",
+]
+
+# 指定 extra 依赖
+[project.optional-dependencies]
+cpu = [
+  "torch==2.10.0+cpu",
+  "torchvision==0.25.0+cpu",
+  "torchaudio==2.10.0+cpu",
+]
+cu128 = [
+  "torch==2.10.0+cu128",
+  "torchvision==0.25.0+cu128",
+  "torchaudio==2.10.0+cu128",
+]
+
+cu130 = [
+  "torch==2.10.0+cu130",
+  "torchvision==0.25.0+cu130",
+  "torchaudio==2.10.0+cu130",
+]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "cu128" },
+    { extra = "cu130" },
+  ],
+]
+
+# 指定源
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu128", extra = "cu128" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu128", extra = "cu128" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+torchaudio = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu128", extra = "cu128" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+
+# 官方 PyPI 镜像（默认国内源可选）
+[[tool.uv.index]]
+name = "internal-proxy"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
+default = true
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[[tool.uv.index]]
+name = "huawei"
+url = "https://mirrors.huaweicloud.com/repository/pypi/simple"
+
+# PyTorch 官方 CPU wheel
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://mirrors.nju.edu.cn/pytorch/whl/cpu"
+explicit = true
+
+# PyTorch 官方 GPU wheel
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://mirrors.nju.edu.cn/pytorch/whl/cu128"
+explicit = true
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://mirrors.nju.edu.cn/pytorch/whl/cu130"
+explicit = true

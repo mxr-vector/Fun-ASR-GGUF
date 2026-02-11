@@ -25,19 +25,11 @@ cpu = [
   "torchaudio==2.10.0+cpu",
   "onnxruntime",
 ]
-cu128 = [
-  "torch==2.10.0+cu128",
-  "torchvision==0.25.0+cu128",
-  "torchaudio==2.10.0+cu128",
-  "onnxruntime-gpu"
-]
 
 [tool.uv]
 conflicts = [
   [
     { extra = "cpu" },
-    { extra = "cu128" },
-    { extra = "cu130" },
   ],
 ]
 
@@ -45,15 +37,12 @@ conflicts = [
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", extra = "cpu" },
-  { index = "pytorch-cu128", extra = "cu128" },
 ]
 torchvision = [
   { index = "pytorch-cpu", extra = "cpu" },
-  { index = "pytorch-cu128", extra = "cu128" },
 ]
 torchaudio = [
   { index = "pytorch-cpu", extra = "cpu" },
-  { index = "pytorch-cu128", extra = "cu128" },
 ]
 
 # 官方 PyPI 镜像（默认国内源可选）
@@ -74,10 +63,4 @@ url = "https://mirrors.huaweicloud.com/repository/pypi/simple"
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://mirrors.nju.edu.cn/pytorch/whl/cpu"
-explicit = true
-
-# PyTorch 官方 GPU wheel
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://mirrors.nju.edu.cn/pytorch/whl/cu128"
 explicit = true

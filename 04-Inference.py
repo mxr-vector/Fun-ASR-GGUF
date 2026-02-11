@@ -33,11 +33,17 @@ verbose = True
 # 是否以 JSON 格式输出结果
 json_output = False
 
+# 是否生成 SRT 字幕文件
+srt = False
 # 模型文件路径
 model_dir = "./model"
 encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx"
 ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.fp16.onnx"
 decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.q8_0.gguf"
+
+# encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx"
+# ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.int8.onnx"
+# decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.q8_0.gguf"
 tokens_path = f"{model_dir}/tokens.txt"
 hotwords_path = "./hot.txt"  # 可选，留空则不使用热词
 
@@ -93,7 +99,7 @@ def main():
         overlap=4.0,
         start_second=0.0,
         duration=60.0,
-        srt=True, 
+        srt=srt, 
         temperature=0.4
     )
 

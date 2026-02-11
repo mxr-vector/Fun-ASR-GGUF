@@ -23,7 +23,7 @@
 推理需要：
 
 ```bash
-uv sync --extra cu130
+uv sync --extra cpu
 uv pip install transformers modelscope
 ```
 

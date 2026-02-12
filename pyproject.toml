@@ -30,6 +30,7 @@ cpu = [
 conflicts = [
   [
     { extra = "cpu" },
+    { extra = "vllm"}
   ],
 ]
 

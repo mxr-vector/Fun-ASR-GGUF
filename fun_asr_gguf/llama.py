@@ -547,6 +547,11 @@ class LlamaContext:
         else:
             params.n_threads_batch = n_threads if n_threads else cpu_count
 
+        if n_threads_batch:
+            params.n_threads_batch = n_threads_batch
+        else:
+            params.n_threads_batch = n_threads if n_threads else cpu_count
+
         self.ptr = llama_init_from_model(model.ptr, params)
         self.ptr = llama_init_from_model(model.ptr, params)
         if not self.ptr:

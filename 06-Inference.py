@@ -37,13 +37,9 @@ json_output = False
 srt = False
 # 模型文件路径
 model_dir = "./model"
-encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx"
-ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.fp16.onnx"
-decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.q8_0.gguf"
-
-# encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx"
-# ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.int8.onnx"
-# decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.q8_0.gguf"
+encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.int4.onnx"
+ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.int4.onnx"
+decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.q5_k.gguf"
 tokens_path = f"{model_dir}/tokens.txt"
 hotwords_path = "./hot.txt"  # 可选，留空则不使用热词
 

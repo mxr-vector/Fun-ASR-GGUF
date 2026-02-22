@@ -2,31 +2,19 @@ import os
 import sys
 import warnings
 import logging
-import gc
-import time
 import torch
 import torchaudio
 import numpy as np
-import onnxruntime
-import onnx
 import base64
 from pathlib import Path
-import torch.nn as nn
-import torch.nn.functional as F
+from export_config import MODEL_DIR, EXPORT_DIR
+import fun_asr_gguf.model_definition as model_def
 
-# Suppress specific warnings
+# Suppress warnings
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("onnxruntime").setLevel(logging.ERROR)
-
-# Import the consolidated model definitions
-import fun_asr_gguf.model_definition as model_def
-from export_config import MODEL_DIR, EXPORT_DIR
-
-# =========================================================================
-# Configuration
-# =========================================================================
 
 OUTPUT_DIR = str(EXPORT_DIR)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -34,10 +22,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 model_dir = str(MODEL_DIR)
 weight_path = os.path.join(model_dir, "model.pt")
 
-# New standardized names
-onnx_encoder_fp32 = f'{OUTPUT_DIR}/Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx'
-onnx_ctc_fp32 = f'{OUTPUT_DIR}/Fun-ASR-Nano-CTC.fp32.onnx'
-tokens_path = f'{OUTPUT_DIR}/tokens.txt'
+# Standardized names
+ONNX_ENCODER_FP32 = f'{OUTPUT_DIR}/Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx'
+ONNX_CTC_FP32 = f'{OUTPUT_DIR}/Fun-ASR-Nano-CTC.fp32.onnx'
+TOKENS_PATH = f'{OUTPUT_DIR}/tokens.txt'
 
 SAMPLE_RATE = 16000
 NFFT_STFT = 400
@@ -45,10 +33,6 @@ WINDOW_LENGTH = 400
 HOP_LENGTH = 160
 N_MELS = 80
 OPSET = 18
-
-# =========================================================================
-# Utils
-# =========================================================================
 
 def generate_sensevoice_vocab(tiktoken_path):
     print(f"Generating vocabulary from {tiktoken_path}...")
@@ -79,17 +63,13 @@ def generate_sensevoice_vocab(tiktoken_path):
     tokens.append(base64.b64encode("<blk>".encode()).decode())
     return tokens
 
-# =========================================================================
-# Main Export
-# =========================================================================
-
 def main():
-    print("\n[Hybrid Export] Consolidated & Paddable Model Export...")
+    print("\n[Step 01] Exporting ONNX FP32 Models...")
     
     tiktoken_path = os.path.join(model_dir, "multilingual.tiktoken")
     if os.path.exists(tiktoken_path):
         tokens = generate_sensevoice_vocab(tiktoken_path)
-        with open(tokens_path, "w", encoding="utf-8") as f:
+        with open(TOKENS_PATH, "w", encoding="utf-8") as f:
             for i, t in enumerate(tokens): f.write(f"{t} {i}\n")
     else:
         print("Warning: tiktoken file not found, vocab generation skipped.")
@@ -103,15 +83,14 @@ def main():
     fbank = (torchaudio.functional.melscale_fbanks(NFFT_STFT // 2 + 1, 20, SAMPLE_RATE // 2, N_MELS, SAMPLE_RATE, None,'htk')).transpose(0, 1).unsqueeze(0)
 
     with torch.no_grad():
-        print(f"\n[1/2] Exporting Paddable Encoder-Adaptor (Dynamo=True)...")
-        # Use the upgraded Paddable Wrapper
+        print(f"\n[1/2] Exporting Encoder-Adaptor...")
         enc_wrapper = model_def.EncoderExportWrapperPaddable(hybrid, stft, fbank).eval()
         dummy_samples = SAMPLE_RATE * 1
         audio = torch.randn(1, 1, dummy_samples)
         ilens = torch.tensor([dummy_samples], dtype=torch.long)
         
         torch.onnx.export(
-            enc_wrapper, (audio, ilens), onnx_encoder_fp32,
+            enc_wrapper, (audio, ilens), ONNX_ENCODER_FP32,
             input_names=['audio', 'ilens'], 
             output_names=['enc_output', 'adaptor_output'],
             dynamic_axes={
@@ -124,18 +103,18 @@ def main():
             dynamo=True
         )
 
-        print(f"\n[2/2] Exporting CTC Head (Dynamo=True)...")
+        print(f"\n[2/2] Exporting CTC Head...")
         ctc_wrapper = model_def.CTCHeadExportWrapper(hybrid).eval()
         dummy_enc = torch.randn(1, 100, 512)
         torch.onnx.export(
-            ctc_wrapper, (dummy_enc,), onnx_ctc_fp32,
+            ctc_wrapper, (dummy_enc,), ONNX_CTC_FP32,
             input_names=['enc_output'], output_names=['indices'],
             dynamic_axes={'enc_output': {1: 'enc_len'}, 'indices': {1: 'enc_len'}},
             opset_version=OPSET,
             dynamo=True
         )
         
-    print("\n[Success] Export complete using consolidated module.")
+    print(f"\n✅ Export complete:\n  - {ONNX_ENCODER_FP32}\n  - {ONNX_CTC_FP32}")
 
 if __name__ == "__main__":
     main()

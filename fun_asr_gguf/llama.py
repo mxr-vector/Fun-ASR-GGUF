@@ -165,7 +165,7 @@ def init_llama_lib():
     global llama_log_set, llama_backend_init, llama_backend_free
     global llama_model_default_params, llama_model_load_from_file, llama_model_free, llama_model_get_vocab
     global llama_context_default_params, llama_init_from_model, llama_free
-    global llama_batch_init, llama_batch_free
+    global llama_batch_init, llama_batch_free, llama_batch_get_one
     global llama_decode, llama_get_logits, llama_get_logits_ith, llama_get_embeddings, llama_tokenize
     global llama_get_memory, llama_memory_clear, llama_model_n_embd
     global llama_vocab_n_tokens, llama_vocab_eos, llama_token_to_piece
@@ -696,25 +696,6 @@ class LlamaBatch:
             self.seq_id[i][0] = seq_id
             self.logits[i] = 1 if i == n_tokens - 1 else 0
         
-        return self
-
-    def set_token(self, token_id: int, pos: Union[np.ndarray, int] = 0, seq_id: int = 0, logits: bool = True):
-        """
-        高阶接口：设置 Batch 中的单个 Token
-        """
-        self.n_tokens = 1
-        self.struct.token[0] = token_id
-        
-        # 处理位置
-        if isinstance(pos, int):
-            self.pos[0] = pos
-        elif isinstance(pos, np.ndarray):
-            # 针对 M-RoPE 等 4D 位置，直接拷贝前 4 个元素或对应长度
-            ctypes.memmove(self.pos, pos.ctypes.data, pos.nbytes)
-        
-        self.n_seq_id[0] = 1
-        self.seq_id[0][0] = seq_id
-        self.logits[0] = 1 if logits else 0
         return self
 
     def __del__(self):

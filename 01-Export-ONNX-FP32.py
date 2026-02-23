@@ -79,23 +79,22 @@ def main():
     hybrid.load_weights(weight_path)
     hybrid.eval()
     
-    stft = model_def.STFT_Process(n_fft=NFFT_STFT, win_length=WINDOW_LENGTH, hop_len=HOP_LENGTH).eval()
-    fbank = (torchaudio.functional.melscale_fbanks(NFFT_STFT // 2 + 1, 20, SAMPLE_RATE // 2, N_MELS, SAMPLE_RATE, None,'htk')).transpose(0, 1).unsqueeze(0)
-
     with torch.no_grad():
-        print(f"\n[1/2] Exporting Encoder-Adaptor...")
-        enc_wrapper = model_def.EncoderExportWrapperPaddable(hybrid, stft, fbank).eval()
-        dummy_samples = SAMPLE_RATE * 1
-        audio = torch.randn(1, 1, dummy_samples)
-        ilens = torch.tensor([dummy_samples], dtype=torch.long)
+        print(f"\n[1/2] Exporting Clean Encoder-Adaptor...")
+        enc_wrapper = model_def.CleanEncoderExportWrapper(hybrid).eval()
+        
+        # 模拟 1 秒音频对应的 LFR 特征: (1, 16.67, 560) -> 见 19 号脚本
+        # 1s 音频 = 100 mel frames. 100 // 6 = 16.67
+        dummy_lfr = torch.randn(1, 17, 560)
+        dummy_mask = torch.ones(1, 17)
         
         torch.onnx.export(
-            enc_wrapper, (audio, ilens), ONNX_ENCODER_FP32,
-            input_names=['audio', 'ilens'], 
+            enc_wrapper, (dummy_lfr, dummy_mask), ONNX_ENCODER_FP32,
+            input_names=['lfr_feat', 'mask'], 
             output_names=['enc_output', 'adaptor_output'],
             dynamic_axes={
-                'audio': {2: 'samples'}, 
-                'ilens': {0: 'batch'},
+                'lfr_feat': {1: 'lfr_frames'}, 
+                'mask': {1: 'lfr_frames'},
                 'enc_output': {1: 'enc_frames'}, 
                 'adaptor_output': {1: 'adaptor_frames'}
             },
@@ -103,7 +102,7 @@ def main():
             dynamo=True
         )
 
-        print(f"\n[2/2] Exporting CTC Head...")
+        print(f"\n[2/2] Exporting Clean CTC Head...")
         ctc_wrapper = model_def.CTCHeadExportWrapper(hybrid).eval()
         dummy_enc = torch.randn(1, 100, 512)
         torch.onnx.export(

@@ -335,3 +335,19 @@ class CTCHeadExportWrapper(nn.Module):
     def forward(self, enc_output):
         h, _ = self.ctc_decoder(enc_output, None)
         return torch.argmax(self.ctc_proj.ctc_lo(h), dim=-1).to(torch.int32)
+
+class CleanEncoderExportWrapper(nn.Module):
+    """
+    Experimental Clean Encoder Wrapper (Input: LFR Features, Mask)
+    Stripped of STFT, Mel, and LFR logic.
+    """
+    def __init__(self, hybrid_model):
+        super().__init__()
+        self.hybrid_model = hybrid_model
+
+    def forward(self, lfr_feat, mask):
+        # lfr_feat: (Batch, T, 560)
+        # mask: (Batch, T) 
+        enc = self.hybrid_model.audio_encoder(lfr_feat, mask)
+        adapt, _ = self.hybrid_model.audio_adaptor(enc, mask)
+        return enc, adapt

@@ -29,8 +29,7 @@ cpu = [
 [tool.uv]
 conflicts = [
   [
-    { extra = "cpu" },
-    { extra = "vllm"}
+    { extra = "cpu" }
   ],
 ]
 

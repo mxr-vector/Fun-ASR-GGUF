@@ -45,7 +45,7 @@ uv pip install transformers modelscope
 #### 下载原始模型
 
 ```bash
-pip install modelscope
+uv pip install modelscope
 
 # 模型下载后会默认存放到 ~/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-Nano-2512 
 modelscope download --model FunAudioLLM/Fun-ASR-Nano-2512 
@@ -57,27 +57,27 @@ modelscope download --model FunAudioLLM/Fun-ASR-Nano-2512
 
 1. **导出 ONNX (FP32)**：从原始模型导出 Encoder 和 CTC 头。
    ```bash
-   python 01-Export-ONNX-FP32.py
+   uv run 01-Export-ONNX-FP32.py
    ```
 2. **算子融合优化**：对 ONNX 进行 Transformer 融合优化，显著提升 DirectML 推理速度。
    ```bash
-   python 02-Optimize-ONNX.py
+   uv run 02-Optimize-ONNX.py
    ```
 3. **ONNX 量化 (INT4/FP16)**：将 Encoder/CTC 量化为 INT4 权重，大幅节省显存。
    ```bash
-   python 03-Quantize-ONNX.py
+   uv run 03-Quantize-ONNX.py
    ```
 4. **导出 Decoder (FP16)**：提取 LLM 部分并转换为 GGUF 格式。
    ```bash
-   python 04-Export-Decoder-GGUF-FP16.py
+   uv run 04-Export-Decoder-GGUF-FP16.py
    ```
 5. **Decoder 量化 (Q5_K)**：使用 `llama-quantize` 对 GGUF 进行高精度量化。
    ```bash
-   python 05-Quantize-Decoder-GGUF.py
+   uv run 05-Quantize-Decoder-GGUF.py
    ```
 6. **运行识别测试**：验证全流程。
    ```bash
-   python 06-Inference.py
+   uv run 06-Inference.py
    ```
 
 ---

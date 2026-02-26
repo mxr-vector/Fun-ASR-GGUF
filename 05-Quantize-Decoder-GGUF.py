@@ -1,11 +1,13 @@
 import os
+import platform
 import subprocess
 from pathlib import Path
 from export_config import EXPORT_DIR
 
 # 设置路径
 PROJECT_ROOT = Path(__file__).parent.absolute()
-QUANTIZE_EXE = PROJECT_ROOT / "fun_asr_gguf" / "bin" / "llama-quantize.exe"
+QUANTIZE_NAME = "llama-quantize.exe" if platform.system() == "Windows" else "llama-quantize"
+QUANTIZE_EXE = PROJECT_ROOT / "fun_asr_gguf" / "bin" / QUANTIZE_NAME
 
 QUANTIZE_TYPE = "q5_k"
 MODEL_DIR = Path(EXPORT_DIR)
@@ -32,7 +34,7 @@ def main():
         QUANTIZE_TYPE
     ]
     
-    print(f"\n🚀 正在启动 llama-quantize.exe...")
+    print(f"\n🚀 正在启动 {QUANTIZE_NAME}...")
     try:
         subprocess.run(cmd, check=True)
         print(f"\n✅ Decoder {QUANTIZE_TYPE} 量化成功！")

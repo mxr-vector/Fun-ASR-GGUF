@@ -13,7 +13,7 @@ from fun_asr_gguf import create_asr_engine
 # ==================== 配置区域 ====================
 
 # 音频文件目录
-data_dir = "./data"
+data_dir = "./datasets"
 
 # 支持的音频扩展名
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}

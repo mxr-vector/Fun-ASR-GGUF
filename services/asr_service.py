@@ -1,6 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from config import settings
+from core.config import settings
 from fun_asr_gguf import create_asr_engine
 from core.logger import logger
 
@@ -49,7 +49,7 @@ class ASRService:
             self.engine = None
         self._executor.shutdown(wait=True)
 
-    def _transcribe_sync(self, filepath: str, language: str = None, context: str = None) -> str:
+    def _transcribe_sync(self, filepath: str, language: str = None, context: str = None) -> dict:
         if not self.engine:
              raise RuntimeError("ASR 引擎尚未初始化")
             
@@ -63,18 +63,23 @@ class ASRService:
             overlap=4.0,
             temperature=0.2,
         )
-        return result.get("text", "") if isinstance(result, dict) else str(result)
+        if isinstance(result, dict):
+            return result
+        import dataclasses
+        if dataclasses.is_dataclass(result):
+            return dataclasses.asdict(result)
+        return {"text": str(result)}
 
-    async def transcribe_async(self, filepath: str, language: str = None, context: str = None) -> str:
+    async def transcribe_async(self, filepath: str, language: str = None, context: str = None) -> dict:
         async with self._lock:
             loop = asyncio.get_running_loop()
-            text = await loop.run_in_executor(
+            result_dict = await loop.run_in_executor(
                 self._executor, 
                 self._transcribe_sync, 
                 filepath, 
                 language, 
                 context
             )
-            return text
+            return result_dict
 
 asr_service = ASRService()

@@ -6,7 +6,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional, List
 from services import asr_service
-from config import settings
+from core.config import settings
 from core.logger import logger
 from core.response import R
 
@@ -19,7 +19,10 @@ class TranscriptionResponse(BaseModel):
     filename: str
     text: str
     language: Optional[str] = None
-    error: Optional[str] = None
+    segments: Optional[list] = None
+    ctc_text: Optional[str] = None
+    hotwords: Optional[list] = None
+    timings: Optional[dict] = None
 
 @router.post("/", response_model=R[TranscriptionResponse])
 async def transcribe_audio(
@@ -47,7 +50,7 @@ async def transcribe_audio(
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        text = await asr_service.transcribe_async(
+        result_dict = await asr_service.transcribe_async(
             temp_path, 
             language=language, 
             context=context
@@ -55,8 +58,12 @@ async def transcribe_audio(
         
         response_data = TranscriptionResponse(
             filename=file.filename,
-            text=text,
-            language=language
+            text=result_dict.get("text", ""),
+            language=language,
+            segments=result_dict.get("segments", []),
+            ctc_text=result_dict.get("ctc_text", ""),
+            hotwords=result_dict.get("hotwords", []),
+            timings=result_dict.get("timings", {})
         )
         
         return R.success(data=response_data)
@@ -101,12 +108,20 @@ async def transcribe_audio_batch(
                 shutil.copyfileobj(file.file, buffer)
             
             # asr_service 内部的 asyncio.Lock() 会安全地处理重叠的并发请求
-            text = await asr_service.transcribe_async(
+            result_dict = await asr_service.transcribe_async(
                 temp_path, 
                 language=language, 
                 context=context
             )
-            return TranscriptionResponse(filename=file.filename, text=text, language=language)
+            return TranscriptionResponse(
+                filename=file.filename, 
+                text=result_dict.get("text", ""), 
+                language=language,
+                segments=result_dict.get("segments", []),
+                ctc_text=result_dict.get("ctc_text", ""),
+                hotwords=result_dict.get("hotwords", []),
+                timings=result_dict.get("timings", {})
+            )
             
         except Exception as e:
             logger.error(f"批量转写文件 {file.filename} 时出错: {e}", exc_info=True)

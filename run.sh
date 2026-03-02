@@ -21,15 +21,11 @@ start() {
     # 确保 logs 目录存在
     mkdir -p logs
 
-    # 这里使用 uvicorn 启动
-    uvicorn "$APP_MODULE" --host "$HOST" --port "$PORT" &
+    # 这里使用 nohup 将 uvicorn 放入后台启动
+    nohup uvicorn "$APP_MODULE" --host "$HOST" --port "$PORT" > logs/app.log 2>&1 &
     PID=$!
     echo $PID > "$PID_FILE"
-    echo "Service started with PID $PID."
-    
-    # 因为这是在 Docker 容器内部启动的主进程，我们需要防止退出
-    # 如果是在后台运行，则 wait
-    wait $PID
+    echo "Service started with PID $PID in the background."
 }
 
 stop() {

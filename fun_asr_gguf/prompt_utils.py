@@ -26,16 +26,16 @@ class PromptBuilder:
             (prefix_embd, suffix_embd, n_prefix, n_suffix, prefix_prompt_text)
         """
         # 构建 Prompt
-        prefix_prompt = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n"
+        prefix_prompt = "<|im_start|>system\n你是专业语音转写助手，擅长准确转录各领域音频，忠实还原口语表达，不修改原始用词和数字读法。<|im_end|>\n<|im_start|>user\n"
 
         if hotwords or context:
             if context:
-                prefix_prompt += f"请结合上下文信息，更加准确地完成语音转写任务。\n\n\n"
-                prefix_prompt += f"**上下文信息：**{context}\n\n\n"
+                prefix_prompt += f"请结合以下背景信息，准确完成语音转写任务。\n\n"
+                prefix_prompt += f"**背景信息：**{context}\n\n"
 
             if hotwords:
-                hotwords_str = ", ".join(hotwords)
-                prefix_prompt += f"热词列表：[{hotwords_str}]\n"
+                hotwords_str = "、".join(hotwords)
+                prefix_prompt += f"**热词（优先识别）：**{hotwords_str}\n\n"
 
         if not language:
             prefix_prompt += "语音转写："

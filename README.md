@@ -496,6 +496,33 @@ model/
 - **LLM Decoder**：GGUF 格式，Q5_K 量化，llama.cpp 推理
 
 
+## Docker部署
+
+```bash
+docker build -t fun-asr-gguf:Dockerfile .
+
+docker builder prune --filter "until=24h"
+# 启动临时容器拷贝文件到本地
+docker run -it --name funasr-gguf fun-asr-gguf:Dockerfile /bin/bash
+
+# 开新终端 拷贝数据
+docker cp funasr-gguf:/workspace $PWD
+
+# 退出容器并删除临时容器
+docker rm -f funasr-gguf
+
+# 拷贝模型到本地
+mv <模型地址> ./workspace/model
+
+# 启动
+docker run -it -p 8001:8001 --shm-size=8g \
+-v $PWD/workspace:/workspace \
+--restart=always \
+--name funasr-gguf fun-asr-gguf:Dockerfile /bin/bash
+
+bash run.sh start
+```
+
 ---
 
 ## 致谢

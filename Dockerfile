@@ -1,7 +1,7 @@
 # 使用官方 python 镜像作为基础镜像
 FROM python:3.11-slim AS base
 LABEL maintainer="YuanJie" \
-    description="An Acoustic Feature Detection Mirror Construction Project" \
+    description="fun-asr-gguf" \
     license="MIT" \
     email="wangjh0825@qq.com"
 
@@ -27,7 +27,7 @@ RUN apt-get update && \
     procps \
     ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /workspace/models/hf/datasets /workspace/logs
+    mkdir -p /workspace/model /workspace/logs /workspace/datasets
 
 # 用 PyPI 国内源安装 uv（稳定）
 ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
@@ -40,13 +40,6 @@ RUN python3 -m pip install --upgrade pip && \
 
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Hugging Face 国内配置
-# 模型缓存目录
-ENV HF_ENDPOINT=https://hf-mirrors.com
-ENV HF_HOME=/workspace/models/hf
-ENV HF_DATASETS_CACHE=/workspace/models/hf/datasets
-# ENV TRANSFORMERS_OFFLINE=1
-# ENV HF_DATASETS_OFFLINE=1
 # 设置工作目录
 WORKDIR /workspace
 
@@ -54,8 +47,8 @@ WORKDIR /workspace
 COPY pyproject.toml .python-version ./
 
 # 同步依赖，--active 强制使用当前 venv，避免重建
-RUN uv sync --python 3.11 --active
-RUN uv pip install transformers==4.57.6 qwen-asr
+RUN uv sync --extra cpu --active
+RUN uv pip install transformers modelscope
 # 再拷贝项目代码
 COPY . .
 

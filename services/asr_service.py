@@ -82,4 +82,40 @@ class ASRService:
             )
             return result_dict
 
+    def get_hotwords(self) -> list:
+        """获取当前配置的热词列表"""
+        if not self.engine or getattr(self.engine, "models", None) is None:
+            return []
+        if getattr(self.engine.models, "hotword_manager", None) is None:
+            return []
+        
+        # 从字典键中获取当前的所有热词, 位于 phoneme_corrector 中
+        try:
+            hw_dict = self.engine.models.hotword_manager.phoneme_corrector.hotwords
+            return list(hw_dict.keys()) if hw_dict else []
+        except AttributeError:
+            return []
+
+    def update_hotwords(self, words: list) -> int:
+        """更新热词文件并触发内存重载"""
+        # 将列表写入文件
+        content = "\n".join(words)
+        
+        path = settings.HOTWORDS_PATH
+        if not path:
+            raise ValueError("热词文件路径未配置")
+            
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content + "\n")
+            
+        # 触发立即重载
+        if self.engine and getattr(self.engine, "models", None) and getattr(self.engine.models, "hotword_manager", None):
+            self.engine.models.hotword_manager._load_hot()
+            try:
+                return len(self.engine.models.hotword_manager.phoneme_corrector.hotwords)
+            except AttributeError:
+                pass
+                
+        return len(words)
+
 asr_service = ASRService()

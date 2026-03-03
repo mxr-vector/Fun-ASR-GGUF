@@ -11,7 +11,7 @@ from core.logger import logger
 from core.response import R
 
 router = APIRouter(
-    prefix="/transcribe",
+    prefix="/asr",
     tags=["ASR Transcription"]
 )
 
@@ -24,7 +24,30 @@ class TranscriptionResponse(BaseModel):
     hotwords: Optional[list] = None
     timings: Optional[dict] = None
 
-@router.post("/", response_model=R[TranscriptionResponse])
+class HotwordsRequest(BaseModel):
+    words: List[str]
+
+@router.get("/hotwords", summary="获取当前热词列表")
+async def get_hotwords():
+    """
+    获取 ASR 引擎当前加载的热词列表。
+    """
+    words = asr_service.get_hotwords()
+    return R.success(data={"words": words, "count": len(words)})
+
+@router.post("/hotwords", summary="更新热词列表（支持热更新）")
+async def update_hotwords(request: HotwordsRequest):
+    """
+    更新 ASR 引擎的热词列表，会覆盖当前文件并热加载。
+    """
+    try:
+        count = asr_service.update_hotwords(request.words)
+        return R.success(msg="热词更新成功", data={"count": count})
+    except Exception as e:
+        logger.error(f"热词更新失败: {e}", exc_info=True)
+        return R.fail(msg=f"热词更新失败: {str(e)}", code=500)
+
+@router.post("/transcribe", response_model=R[TranscriptionResponse])
 async def transcribe_audio(
     file: UploadFile = File(...),
     language: Optional[str] = Form(None, description="语言设置（None=自动检测）"),
@@ -77,7 +100,7 @@ async def transcribe_audio(
             os.remove(temp_path)
 
 
-@router.post("/batch", response_model=R[List[TranscriptionResponse]])
+@router.post("/transcribe/batch", response_model=R[List[TranscriptionResponse]])
 async def transcribe_audio_batch(
     files: List[UploadFile] = File(...),
     language: Optional[str] = Form(None, description="语言设置（None=自动检测）"),

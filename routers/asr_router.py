@@ -18,7 +18,7 @@ router = APIRouter(
 class TranscriptionResponse(BaseModel):
     filename: str
     text: str
-    audioId: Optional[str] = None
+    audio_id: Optional[str] = None
     error: Optional[str] = None
     language: Optional[str] = None
     segments: Optional[list] = None
@@ -52,7 +52,7 @@ async def update_hotwords(request: HotwordsRequest):
 @router.post("/transcribe", response_model=R[TranscriptionResponse], summary="单个音频文件转写")
 async def transcribe_audio(
     file: UploadFile = File(...),
-    audioId: Optional[str] = Form(None, description="音频的自定义ID，原样返回"),
+    audio_id: Optional[str] = Form(None, description="音频的自定义ID，原样返回"),
     language: Optional[str] = Form(None, description="语言设置（None=自动检测）"),
     context: Optional[str] = Form(settings.DEFAULT_CONTEXT, description="上下文信息"),
 ):
@@ -83,7 +83,7 @@ async def transcribe_audio(
         )
         
         response_data = TranscriptionResponse(
-            audioId=audioId,
+            audio_id=audio_id,
             filename=file.filename,
             text=result_dict.get("text", ""),
             language=language,
@@ -107,7 +107,7 @@ async def transcribe_audio(
 @router.post("/transcribe/batch", response_model=R[List[TranscriptionResponse]], summary="批量音频文件转写")
 async def transcribe_audio_batch(
     files: List[UploadFile] = File(...),
-    audioIds: Optional[List[str]] = Form(None, description="音频的ID列表，需与files顺序对应"),
+    audio_ids: Optional[List[str]] = Form(None, description="音频的ID列表，需与files顺序对应"),
     language: Optional[str] = Form(None, description="语言设置（None=自动检测）"),
     context: Optional[str] = Form(settings.DEFAULT_CONTEXT, description="上下文信息"),
 ):
@@ -125,7 +125,7 @@ async def transcribe_audio_batch(
     # 内部异步函数：用于处理单个文件
     async def process_single_file(file: UploadFile, audio_id: Optional[str]) -> TranscriptionResponse:
         if not file.filename:
-            return TranscriptionResponse(audioId=audio_id, filename="unknown", text="", error="No filename provided")
+            return TranscriptionResponse(audio_id=audio_id, filename="unknown", text="", error="No filename provided")
             
         ext = os.path.splitext(file.filename)[1].lower()
         fd, temp_path = tempfile.mkstemp(suffix=ext)
@@ -142,7 +142,7 @@ async def transcribe_audio_batch(
                 context=context
             )
             return TranscriptionResponse(
-                audioId=audio_id,
+                audio_id=audio_id,
                 filename=file.filename, 
                 text=result_dict.get("text", ""), 
                 language=language,
@@ -154,7 +154,7 @@ async def transcribe_audio_batch(
             
         except Exception as e:
             logger.error(f"批量转写文件 {file.filename} 时出错: {e}", exc_info=True)
-            return TranscriptionResponse(audioId=audio_id, filename=file.filename, text="", error=str(e))
+            return TranscriptionResponse(audio_id=audio_id, filename=file.filename, text="", error=str(e))
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
@@ -162,7 +162,7 @@ async def transcribe_audio_batch(
     # 使用 gather 并发调度所有转写任务，服务层的锁机制会自动对它们进行安全排队
     coroutines = []
     for idx, f in enumerate(files):
-        aid = audioIds[idx] if audioIds and idx < len(audioIds) else None
+        aid = audio_ids[idx] if audio_ids and idx < len(audio_ids) else None
         coroutines.append(process_single_file(f, aid))
 
     results = await asyncio.gather(*coroutines)

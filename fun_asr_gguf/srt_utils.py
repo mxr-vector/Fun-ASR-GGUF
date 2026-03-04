@@ -16,7 +16,7 @@ def generate_srt_file(
     根据字级时间戳生成 SRT 文件
     
     Args:
-        segments: 列表，每项包含 {'char', 'start'}
+        segments: 列表，每项包含 {'token', 'start'}
         output_path: 导出路径
         max_chars_per_line: 每行最大字符数
     """
@@ -32,7 +32,7 @@ def generate_srt_file(
     start_time = segments[0]['start']
     
     for i, seg in enumerate(segments):
-        char = seg['char']
+        char = seg['token']
         time_s = seg['start']
         
         current_chars.append(char)

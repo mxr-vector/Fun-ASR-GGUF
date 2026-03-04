@@ -131,8 +131,8 @@ def align_timestamps(ctc_results, llm_text):
     if not ctc_results or not llm_text:
         return []
 
-    # 1. 展开 CTC 结果为字符级别（只保留起始位置）
-    ctc_chars = []
+    # 1. 展开 CTC 结果为 token 级别（只保留起始位置）
+    ctc_tokens = []
     for item in ctc_results:
         text = item.text
         start = item.start
@@ -141,16 +141,16 @@ def align_timestamps(ctc_results, llm_text):
         if len(text) > 0:
             # 将 token 时间范围均匀分配给每个字符
             token_dur = end - start if end > start else 0.08 * len(text)
-            char_duration = token_dur / len(text)
+            token_duration = token_dur / len(text)
             for i, char in enumerate(text):
-                c_start = start + i * char_duration
-                c_end = c_start + char_duration
-                ctc_chars.append({"char": char, "start": c_start, "end": c_end})
+                c_start = start + i * token_duration
+                c_end = c_start + token_duration
+                ctc_tokens.append({"token": char, "start": c_start, "end": c_end})
 
-    llm_chars = list(llm_text)
+    llm_tokens = list(llm_text)
 
-    n = len(ctc_chars) + 1
-    m = len(llm_chars) + 1
+    n = len(ctc_tokens) + 1
+    m = len(llm_tokens) + 1
 
     # Core DP Matrix
     score = np.zeros((n, m), dtype=np.float32)
@@ -168,10 +168,10 @@ def align_timestamps(ctc_results, llm_text):
     # Fill DP
     for i in range(1, n):
         for j in range(1, m):
-            char_ctc = ctc_chars[i-1]["char"]
-            char_llm = llm_chars[j-1]
+            token_ctc = ctc_tokens[i-1]["token"]
+            token_llm = llm_tokens[j-1]
 
-            s_diag = score[i-1][j-1] + (match_score if char_ctc.lower() == char_llm.lower() else mismatch_score)
+            s_diag = score[i-1][j-1] + (match_score if token_ctc.lower() == token_llm.lower() else mismatch_score)
             s_up = score[i-1][j] + gap_penalty
             s_left = score[i][j-1] + gap_penalty
 
@@ -183,12 +183,12 @@ def align_timestamps(ctc_results, llm_text):
             else: trace[i][j] = 3
 
     # Traceback
-    llm_alignment = [None] * len(llm_chars)
+    llm_alignment = [None] * len(llm_tokens)
     i, j = n - 1, m - 1
 
     while i > 0 or j > 0:
         if i > 0 and j > 0 and trace[i][j] == 1:
-            llm_alignment[j-1] = ctc_chars[i-1]
+            llm_alignment[j-1] = ctc_tokens[i-1]
             i -= 1
             j -= 1
         elif i > 0 and (j == 0 or trace[i][j] == 2):
@@ -203,7 +203,7 @@ def align_timestamps(ctc_results, llm_text):
         if item is not None:
             anchors.append((idx, item["start"]))
 
-    final_chars = []
+    final_tokens = []
 
     def get_interpolated_start(target_idx):
         """插值计算起始位置"""
@@ -233,17 +233,17 @@ def align_timestamps(ctc_results, llm_text):
         else:
             return 0.0
 
-    for idx, char in enumerate(llm_chars):
+    for idx, char in enumerate(llm_tokens):
         if llm_alignment[idx]:
             s = llm_alignment[idx]["start"]
             e = llm_alignment[idx].get("end", s + 0.08)
         else:
             s = get_interpolated_start(idx)
             e = s + 0.08  # 默认每字符 80ms
-        final_chars.append({"char": char, "start": s, "end": e})
+        final_tokens.append({"token": char, "start": s, "end": e})
 
-    # 后处理：确保相邻字符的 end 与下一个字符的 start 一致
-    for i in range(len(final_chars) - 1):
-        final_chars[i]["end"] = final_chars[i + 1]["start"]
+    # 后处理：确保相邻 token 的 end 与下一个 token 的 start 一致
+    for i in range(len(final_tokens) - 1):
+        final_tokens[i]["end"] = final_tokens[i + 1]["start"]
 
-    return final_chars
+    return final_tokens

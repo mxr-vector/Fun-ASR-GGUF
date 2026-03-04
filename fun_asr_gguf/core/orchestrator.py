@@ -118,7 +118,7 @@ class TranscriptionOrchestrator:
         result.segments = []
         for seg in (d_res.aligned or []):
             result.segments.append({
-                'char': seg['char'],
+                'token': seg['token'],
                 'start': seg['start'] + base_offset,
                 'end': seg.get('end', seg['start']) + base_offset
             })
@@ -230,7 +230,7 @@ class TranscriptionOrchestrator:
 
         vad_segs = []
         seg_start = segments[0].get("start", 0.0)
-        seg_text = segments[0].get("char", "")
+        seg_text = segments[0].get("token", "")
 
         for i in range(1, len(segments)):
             prev_end = segments[i - 1].get("end", segments[i - 1].get("start", 0.0))
@@ -241,19 +241,19 @@ class TranscriptionOrchestrator:
                 vad_segs.append({
                     "start": round(seg_start, 3),
                     "end": round(prev_end, 3),
-                    "text": seg_text
+                    "token": seg_text
                 })
                 seg_start = curr_start
-                seg_text = segments[i].get("char", "")
+                seg_text = segments[i].get("token", "")
             else:
-                seg_text += segments[i].get("char", "")
+                seg_text += segments[i].get("token", "")
 
         # 最后一个分段
         last_end = segments[-1].get("end", segments[-1].get("start", 0.0))
         vad_segs.append({
             "start": round(seg_start, 3),
             "end": round(last_end, 3),
-            "text": seg_text
+            "token": seg_text
         })
 
         return vad_segs

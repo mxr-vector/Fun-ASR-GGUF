@@ -225,13 +225,13 @@ class StreamDecoder:
         if ctc_results:
             aligned = align_timestamps(ctc_results, text)
             if aligned:
-                tokens = [seg['char'] for seg in aligned]
+                tokens = [seg['token'] for seg in aligned]
                 timestamps = [seg['start'] for seg in aligned]
         timings.align = time.perf_counter() - t_s
         
         if reporter and aligned:
             reporter.print(f"    对齐耗时: {timings.align*1000:.2f}ms")
-            preview = " ".join([f"{r['char']}({r['start']:.2f}s)" for r in aligned[:10]])
+            preview = " ".join([f"{r['token']}({r['start']:.2f}s)" for r in aligned[:10]])
             if len(aligned) > 10: preview += " ..."
             reporter.print(f"    结果预览: {preview}")
 

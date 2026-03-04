@@ -21,7 +21,7 @@ class TranscriptionResponse(BaseModel):
     audio_id: Optional[str] = None
     error: Optional[str] = None
     language: Optional[str] = None
-    segments: Optional[list] = None
+    ctc_segments: Optional[list] = None
     ctc_text: Optional[str] = None
     hotwords: Optional[list] = None
     timings: Optional[dict] = None
@@ -89,7 +89,7 @@ async def transcribe_audio(
             filename=file.filename,
             text=result_dict.get("text", ""),
             language=language,
-            segments=result_dict.get("segments", []),
+            ctc_segments=result_dict.get("segments", []),
             ctc_text=result_dict.get("ctc_text", ""),
             hotwords=result_dict.get("hotwords", []),
             timings=result_dict.get("timings", {}),
@@ -150,7 +150,7 @@ async def transcribe_audio_batch(
                 filename=file.filename, 
                 text=result_dict.get("text", ""), 
                 language=language,
-                segments=result_dict.get("segments", []),
+                ctc_segments=result_dict.get("segments", []),
                 ctc_text=result_dict.get("ctc_text", ""),
                 hotwords=result_dict.get("hotwords", []),
                 timings=result_dict.get("timings", {}),

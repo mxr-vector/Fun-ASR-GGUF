@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .. import llama
-from ..nano_ctc import load_ctc_tokens
+from ..ctc import load_ctc_tokens
 from ..nano_onnx import load_onnx_models
 from ..hotword.manager import get_hotword_manager
 from ..utils import vprint
 from ..prompt_utils import PromptBuilder
-from ..nano_dataclass import ASREngineConfig
+from ..schema import ASREngineConfig
 
 class ModelManager:
     """管理所有模型组件的代码"""

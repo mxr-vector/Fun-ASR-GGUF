@@ -25,6 +25,8 @@ class TranscriptionResponse(BaseModel):
     ctc_text: Optional[str] = None
     hotwords: Optional[list] = None
     timings: Optional[dict] = None
+    duration: Optional[float] = None
+    vad_segments: Optional[list] = None
 
 class HotwordsRequest(BaseModel):
     words: List[str]
@@ -90,7 +92,9 @@ async def transcribe_audio(
             segments=result_dict.get("segments", []),
             ctc_text=result_dict.get("ctc_text", ""),
             hotwords=result_dict.get("hotwords", []),
-            timings=result_dict.get("timings", {})
+            timings=result_dict.get("timings", {}),
+            duration=result_dict.get("duration", None),
+            vad_segments=result_dict.get("vad_segments", []),
         )
         
         return R.success(data=response_data)
@@ -149,7 +153,9 @@ async def transcribe_audio_batch(
                 segments=result_dict.get("segments", []),
                 ctc_text=result_dict.get("ctc_text", ""),
                 hotwords=result_dict.get("hotwords", []),
-                timings=result_dict.get("timings", {})
+                timings=result_dict.get("timings", {}),
+                duration=result_dict.get("duration", None),
+                vad_segments=result_dict.get("vad_segments", []),
             )
             
         except Exception as e:

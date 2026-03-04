@@ -8,6 +8,7 @@ from dataclasses import dataclass
 class Token:
     text: str
     start: float
+    end: float = 0.0
 
 def load_ctc_tokens(filename):
     """加载 CTC 词表"""
@@ -81,7 +82,12 @@ def decode_ctc(logits, id2token):
 
     results = []
 
-    # 2. Filter blanks and decode text
+    # 总帧数对应的音频结尾时间（用于计算最后一个 token 的 end）
+    total_frames = len(indices)
+    audio_end_time = max((total_frames * frame_shift_ms + offset_ms) / 1000.0, 0.0)
+
+    # 2. Filter blanks and collect valid tokens with frame indices
+    valid_tokens = []
     for token_id, start in collapsed:
         if token_id == blank_id:
             continue
@@ -89,18 +95,20 @@ def decode_ctc(logits, id2token):
         token_text = id2token.get(token_id, "")
         if not token_text: continue
 
-        # [Optimized] Base64 decoding is now done in load_ctc_tokens
-        # try:
-        #     token_text = base64.b64decode(token_b64).decode("utf-8")
-        # except:
-        #     continue
-
-        # Calculate time (只计算起始位置)
         t_start = max((start * frame_shift_ms + offset_ms) / 1000.0, 0.0)
+        valid_tokens.append((token_text, t_start))
+
+    # 3. Compute end time: 下一个 token 的 start 即为当前 token 的 end
+    for i, (text, t_start) in enumerate(valid_tokens):
+        if i + 1 < len(valid_tokens):
+            t_end = valid_tokens[i + 1][1]
+        else:
+            t_end = audio_end_time
 
         results.append(Token(
-            text=token_text,
-            start=t_start
+            text=text,
+            start=t_start,
+            end=t_end
         ))
                 
     full_text = "".join([r.text for r in results])
@@ -128,13 +136,16 @@ def align_timestamps(ctc_results, llm_text):
     for item in ctc_results:
         text = item.text
         start = item.start
+        end = item.end
 
         if len(text) > 0:
-            # 假设每个字符占用相同时间间隔
-            char_duration = 0.08  # 默认每个字符约 80ms
+            # 将 token 时间范围均匀分配给每个字符
+            token_dur = end - start if end > start else 0.08 * len(text)
+            char_duration = token_dur / len(text)
             for i, char in enumerate(text):
                 c_start = start + i * char_duration
-                ctc_chars.append({"char": char, "start": c_start})
+                c_end = c_start + char_duration
+                ctc_chars.append({"char": char, "start": c_start, "end": c_end})
 
     llm_chars = list(llm_text)
 
@@ -225,8 +236,14 @@ def align_timestamps(ctc_results, llm_text):
     for idx, char in enumerate(llm_chars):
         if llm_alignment[idx]:
             s = llm_alignment[idx]["start"]
+            e = llm_alignment[idx].get("end", s + 0.08)
         else:
             s = get_interpolated_start(idx)
-        final_chars.append({"char": char, "start": s})
+            e = s + 0.08  # 默认每字符 80ms
+        final_chars.append({"char": char, "start": s, "end": e})
+
+    # 后处理：确保相邻字符的 end 与下一个字符的 start 一致
+    for i in range(len(final_chars) - 1):
+        final_chars[i]["end"] = final_chars[i + 1]["start"]
 
     return final_chars

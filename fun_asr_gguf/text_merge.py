@@ -26,7 +26,7 @@ def merge_transcription_results(
         offset = segment_offsets[0]
         full_segments = []
         for seg in results[0].get('segments') or []:
-            full_segments.append({'char': seg['char'], 'start': seg['start'] + offset})
+            full_segments.append({'char': seg['char'], 'start': seg['start'] + offset, 'end': seg.get('end', seg['start']) + offset})
         return results[0]['text'], full_segments
 
     full_segments = []
@@ -37,9 +37,10 @@ def merge_transcription_results(
         curr_segments = res.get('segments') or []
         for seg in curr_segments:
             seg['_global_start'] = seg['start'] + offset
+            seg['_global_end'] = seg.get('end', seg['start']) + offset
 
         if i == 0:
-            full_segments.extend([{'char': s['char'], 'start': s['_global_start']} for s in curr_segments])
+            full_segments.extend([{'char': s['char'], 'start': s['_global_start'], 'end': s['_global_end']} for s in curr_segments])
             continue
 
         if not curr_segments:
@@ -93,15 +94,15 @@ def merge_transcription_results(
             
             if match_idx_in_curr != -1:
                 to_add = curr_segments[match_idx_in_curr:]
-                full_segments.extend([{'char': s['char'], 'start': s['_global_start']} for s in to_add])
+                full_segments.extend([{'char': s['char'], 'start': s['_global_start'], 'end': s['_global_end']} for s in to_add])
             else:
                 # 几乎不可能
-                full_segments.extend([{'char': s['char'], 'start': s['_global_start']} for s in curr_segments])
+                full_segments.extend([{'char': s['char'], 'start': s['_global_start'], 'end': s['_global_end']} for s in curr_segments])
         else:
             # 兜底：基于时间戳硬拼接
             last_time = full_segments[-1]['start'] if full_segments else offset
             to_add = [s for s in curr_segments if s['_global_start'] > last_time + 0.1]
-            full_segments.extend([{'char': s['char'], 'start': s['_global_start']} for s in to_add])
+            full_segments.extend([{'char': s['char'], 'start': s['_global_start'], 'end': s['_global_end']} for s in to_add])
 
     # 后处理：清理标点重复和残留
     clean_segments = []

@@ -52,6 +52,7 @@ class TranscriptionOrchestrator:
                 result.timings.load_audio = time.perf_counter() - t_load_s
                 
                 audio_duration = len(audio) / self.models.config.sample_rate
+                result.duration = audio_duration
                 reporter.print(f"    音频长度: {audio_duration:.2f}s")
                 if start_second:
                     reporter.print(f"    起始偏移: {start_second:.2f}s")
@@ -84,6 +85,11 @@ class TranscriptionOrchestrator:
                     reporter.print(result.text, force=True)
                     reporter.print("-" * 74 + "\n", force=True)
 
+                # 5. Compute VAD segments from timestamps
+                result.vad_segments = self._compute_vad_segments(
+                    result.segments, result.duration
+                )
+
                 return result
 
             except Exception as e:
@@ -111,7 +117,11 @@ class TranscriptionOrchestrator:
         result.text = d_res.text
         result.segments = []
         for seg in (d_res.aligned or []):
-            result.segments.append({'char': seg['char'], 'start': seg['start'] + base_offset})
+            result.segments.append({
+                'char': seg['char'],
+                'start': seg['start'] + base_offset,
+                'end': seg.get('end', seg['start']) + base_offset
+            })
         
         result.hotwords = d_res.hotwords
         if d_res.ctc_results:
@@ -206,6 +216,47 @@ class TranscriptionOrchestrator:
         reporter.print(f"  - LLM生成：  {result.timings.llm_generate*1000:5.0f}ms")
         reporter.print(f"  - 时间对齐： {result.timings.align*1000:5.0f}ms")
         reporter.print(f"  - 推理总计： {result.timings.total:5.2f}s\n")
+
+    def _compute_vad_segments(self, segments, audio_duration, silence_threshold=0.5):
+        """
+        基于字符级时间戳推断说话分段（伪VAD）。
+        当相邻字符间隔超过 silence_threshold 秒时，视为静音切分点。
+        
+        Returns:
+            List[Dict]: [{"start": float, "end": float, "text": str}, ...]
+        """
+        if not segments:
+            return []
+
+        vad_segs = []
+        seg_start = segments[0].get("start", 0.0)
+        seg_text = segments[0].get("char", "")
+
+        for i in range(1, len(segments)):
+            prev_end = segments[i - 1].get("end", segments[i - 1].get("start", 0.0))
+            curr_start = segments[i].get("start", 0.0)
+
+            if curr_start - prev_end > silence_threshold:
+                # 静音间隔，切分
+                vad_segs.append({
+                    "start": round(seg_start, 3),
+                    "end": round(prev_end, 3),
+                    "text": seg_text
+                })
+                seg_start = curr_start
+                seg_text = segments[i].get("char", "")
+            else:
+                seg_text += segments[i].get("char", "")
+
+        # 最后一个分段
+        last_end = segments[-1].get("end", segments[-1].get("start", 0.0))
+        vad_segs.append({
+            "start": round(seg_start, 3),
+            "end": round(last_end, 3),
+            "text": seg_text
+        })
+
+        return vad_segs
 
     def _print_performance_stats(self, reporter, d_res, audio, t_inject, t_llm):
         stats = Statistics(

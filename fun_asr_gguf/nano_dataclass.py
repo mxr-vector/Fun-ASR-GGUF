@@ -118,6 +118,8 @@ class TranscriptionResult:
     ctc_text: str = ""
     hotwords: List[str] = field(default_factory=list)
     timings: Timings = field(default_factory=Timings)
+    duration: float = 0.0
+    vad_segments: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ==================== 引擎配置相关 ====================

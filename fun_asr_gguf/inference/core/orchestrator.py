@@ -3,11 +3,11 @@ import time
 import numpy as np
 from typing import Optional, List
 
-from ..nano_audio import load_audio
+from ..audio import load_audio
 from ..text_merge import merge_transcription_results
 from ..srt_utils import generate_srt_file
 from ..display import DisplayReporter
-from ..nano_dataclass import TranscriptionResult, Statistics, RecognitionStream
+from ..schema import TranscriptionResult, Statistics, RecognitionStream
 from .model_manager import ModelManager
 from .decoder import StreamDecoder
 
@@ -197,15 +197,10 @@ class TranscriptionOrchestrator:
     def _print_stats(self, reporter, result):
         reporter.print(f"\n[转录耗时]")
         reporter.print(f"  - 音频编码： {result.timings.encode*1000:5.0f}ms")
-        reporter.print(f"  - CTC解码：  {result.timings.ctc*1000:5.0f}ms "
-                       f"(Infer: {result.timings.ctc_infer*1000:.0f}ms, "
-                       f"Dec: {result.timings.ctc_decode*1000:.0f}ms, "
-                       f"HW: {getattr(result.timings, 'hotword_verify', 0)*1000:.0f}ms)")
-        reporter.print(f"  - Prompt:    {result.timings.prepare*1000:5.0f}ms")
+        reporter.print(f"  - CTC解码：  {result.timings.ctc*1000:5.0f}ms")
         reporter.print(f"  - LLM读取：  {result.timings.inject*1000:5.0f}ms")
         reporter.print(f"  - LLM生成：  {result.timings.llm_generate*1000:5.0f}ms")
-        reporter.print(f"  - 时间对齐： {result.timings.align*1000:5.0f}ms")
-        reporter.print(f"  - 推理总计： {result.timings.total:5.2f}s\n")
+        reporter.print(f"  - 总耗时：   {result.timings.total:5.2f}s\n")
 
     def _print_performance_stats(self, reporter, d_res, audio, t_inject, t_llm):
         stats = Statistics(

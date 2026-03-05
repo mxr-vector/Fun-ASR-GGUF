@@ -61,7 +61,7 @@ class ASRService:
             # 使用与 batch_transcribe 相同的默认片段参数
             segment_size=60.0,
             overlap=4.0,
-            temperature=0.2,
+            temperature=0.0,
         )
         if isinstance(result, dict):
             return result

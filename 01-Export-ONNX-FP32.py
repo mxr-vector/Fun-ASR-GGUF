@@ -116,8 +116,13 @@ def main():
         dummy_enc = torch.randn(1, 100, 512)
         torch.onnx.export(
             ctc_wrapper, (dummy_enc,), ONNX_CTC_FP32,
-            input_names=['enc_output'], output_names=['indices'],
-            dynamic_axes={'enc_output': {1: 'enc_len'}, 'indices': {1: 'enc_len'}},
+            input_names=['enc_output'], 
+            output_names=['topk_log_probs', 'topk_indices'],
+            dynamic_axes={
+                'enc_output': {1: 'enc_len'}, 
+                'topk_log_probs': {1: 'enc_len'}, 
+                'topk_indices': {1: 'enc_len'}
+            },
             opset_version=OPSET,
             dynamo=True
         )

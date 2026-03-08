@@ -144,7 +144,10 @@ class StreamDecoder:
             ctc_text = "".join([r.text for r in ctc_results])
             reporter.print(f"    CTC: {ctc_text}")
             if hotwords: reporter.print(f"    热词: {hotwords}")
-        reporter.print(f"    耗时: {timings.ctc*1000:.2f}ms")
+        
+        # 详细耗时详情
+        t_detail = " | ".join([f"{k}:{v*1000:.1f}ms" for k, v in ctc_times.items() if v > 0])
+        reporter.print(f"    耗时: {timings.ctc*1000:.2f}ms ({t_detail})")
 
         # 3. Prompt
         reporter.print("\n[4] 准备 Prompt...")

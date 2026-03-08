@@ -3,7 +3,7 @@ ASR 演示脚本 - 简单直接的使用示例
 """
 
 import os
-from fun_asr_gguf import create_asr_engine
+from fun_asr_gguf import FunASREngine, ASREngineConfig
 
 
 # ==================== Vulkan 选项 ====================
@@ -64,8 +64,7 @@ def main():
     print("ASR 语音识别")
     print("="*70)
 
-    # 创建 ASR 引擎
-    engine = create_asr_engine(
+    config = ASREngineConfig(
         encoder_onnx_path=encoder_onnx_path,
         ctc_onnx_path=ctc_onnx_path,
         decoder_gguf_path=decoder_gguf_path,
@@ -74,8 +73,10 @@ def main():
         similar_threshold=0.6, 
         max_hotwords=10, 
         enable_ctc=enable_ctc,
+        onnx_provider='cuda', 
         verbose=verbose,
     )
+    engine = FunASREngine(config)
 
     print(f'\n预跑一遍，分配内存......\n')
     result = engine.transcribe(

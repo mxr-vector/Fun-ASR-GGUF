@@ -115,7 +115,8 @@ class StreamDecoder:
         reporter: Optional[DisplayReporter] = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
-        top_k: int = 50
+        top_k: int = 50,
+        timestamp_offset: float = -0.24
     ) -> DecodeResult:
         
         reporter = reporter or _SILENT_REPORTER
@@ -134,7 +135,8 @@ class StreamDecoder:
         ctc_results, hotwords, ctc_times = self.models.ctc_decoder.decode(
             enc_output, 
             self.models.config.enable_ctc, 
-            self.models.config.max_hotwords
+            self.models.config.max_hotwords, 
+            top_k = 10
         )
         timings.ctc = time.perf_counter() - t_s
         
@@ -230,6 +232,11 @@ class StreamDecoder:
                 tokens = [seg['token'] for seg in aligned]
                 timestamps = [seg['start'] for seg in aligned]
         timings.align = time.perf_counter() - t_s
+        
+        # 应用时间戳偏移（只影响字幕输出，不影响 integrate 和 radar）
+        if aligned and timestamp_offset != 0.0:
+            for seg in aligned:
+                seg['start'] = max(seg['start'] + timestamp_offset, 0.0)
         
         if aligned:
             reporter.print(f"    对齐耗时: {timings.align*1000:.2f}ms")

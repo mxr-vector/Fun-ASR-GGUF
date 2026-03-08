@@ -5,6 +5,8 @@ from pathlib import Path
 from .. import llama
 from ..encoder import AudioEncoder
 from ..ctc import CTCDecoder
+from ..radar import HotwordRadar
+from ..integrator import ResultIntegrator
 from ..hotword.manager import get_hotword_manager
 from ..utils import vprint
 from ..prompt_utils import PromptBuilder
@@ -30,6 +32,8 @@ class ModelManager:
         # 辅助组件
         self.hotword_manager = None
         self.corrector = None
+        self.radar = None
+        self.integrator = ResultIntegrator()
         self.prompt_builder = None
         
         self._initialized = False
@@ -99,6 +103,13 @@ class ModelManager:
             
             # 绑定校对器到 CTC 解码器
             self.ctc_decoder.corrector = self.corrector
+            
+            # [HOTWORD] 初始化雷达与整合器，注入到 CTC 解码器
+            all_hotwords = list(self.corrector.hotwords.keys())
+            self.radar = HotwordRadar(all_hotwords, self.ctc_decoder.tokenizer)
+            self.ctc_decoder.radar = self.radar
+            self.ctc_decoder.integrator = self.integrator
+
 
             self._initialized = True
             vprint(f"✓ 模型加载完成 (耗时: {time.perf_counter() - t_start:.2f}s)", verbose)

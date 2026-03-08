@@ -77,18 +77,22 @@ class Timings:
     Attributes:
         encode: 音频编码耗时
         ctc: CTC 解码耗时
+        radar: 雷达扫描耗时
         prepare: Prompt 准备耗时
         inject: LLM embeddings 注入耗时
         llm_generate: LLM 文本生成耗时
         align: 时间戳对齐耗时
+        integrate: 文本整合耗时
         total: 总耗时
     """
     encode: float = 0.0
     ctc: float = 0.0
+    radar: float = 0.0
     prepare: float = 0.0
     inject: float = 0.0
     llm_generate: float = 0.0
     align: float = 0.0
+    integrate: float = 0.0
     total: float = 0.0
 
 

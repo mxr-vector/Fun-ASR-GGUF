@@ -437,6 +437,30 @@ def align_timestamps(ctc_results, llm_text):
             s = get_interpolated_start(idx)
         final_chars.append({"token": char, "start": s})
 
+    # 计算每个字符的 end 时间 (下一个字符的 start 或者 +0.08s)
+    for i in range(len(final_chars)):
+        if i < len(final_chars) - 1:
+            final_chars[i]["end"] = final_chars[i+1]["start"]
+        else:
+            final_chars[i]["end"] = final_chars[i]["start"] + 0.08
+            
+    # Fix the issue where multiple initial characters have 0.0 as start timestamp
+    # If the first few tokens have 0.0, space them out backwards from the first non-zero token
+    first_nonzero_idx = -1
+    for i, char in enumerate(final_chars):
+        if char["start"] > 0.0:
+            first_nonzero_idx = i
+            break
+            
+    if first_nonzero_idx > 0:
+        # Space out backwards from first_nonzero_idx
+        # assuming 0.08s per character
+        base_time = final_chars[first_nonzero_idx]["start"]
+        for i in range(first_nonzero_idx - 1, -1, -1):
+            new_start = max(0.0, base_time - (first_nonzero_idx - i) * 0.08)
+            final_chars[i]["start"] = new_start
+            final_chars[i]["end"] = final_chars[i+1]["start"]
+
     return final_chars
 
 

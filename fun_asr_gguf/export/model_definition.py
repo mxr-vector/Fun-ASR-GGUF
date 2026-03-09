@@ -1,9 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchaudio
-import base64
-import numpy as np
 
 # ============================================================================
 # Basic Building Blocks
@@ -24,13 +21,11 @@ class SinusoidalPositionEncoder(nn.Module):
         return encoding.type(dtype)
 
     def forward(self, x, mask=None):
-        batch_size, timesteps, input_dim = x.size()
         # Shape Inheritance: Create indices (1, 2, ..., T) without using arange.view/unsqueeze
-        # This creates (B, T) indices directly
+        # This is strictly DML-safe.
         positions = torch.ones_like(x[:, :, 0], dtype=torch.long).cumsum(1)
-        position_encoding = self.encode(positions, input_dim, x.dtype).to(x.device)
-        x = x + position_encoding
-        return x
+        position_encoding = self.encode(positions, x.size(-1), x.dtype).to(x.device)
+        return x + position_encoding
 
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, idim, hidden_units, dropout_rate, activation=None):
@@ -46,8 +41,7 @@ class PositionwiseFeedForward(nn.Module):
 
 class LayerNorm(nn.LayerNorm):
     def forward(self, input):
-        output = F.layer_norm(input.float(), self.normalized_shape, self.weight.float() if self.weight is not None else None, self.bias.float() if self.bias is not None else None, self.eps)
-        return output.type_as(input)
+        return F.layer_norm(input, self.normalized_shape, self.weight, self.bias, self.eps)
 
 # ============================================================================
 # SANM Components
@@ -93,9 +87,7 @@ class MultiHeadedAttentionSANM(nn.Module):
         fsmn_memory = self.forward_fsmn(v, mask)
         scores = torch.matmul(q_h * (self.d_k ** -0.5), k_h.transpose(-2, -1))
         att_outs = self.forward_attention(v_h, scores, mask)
-        
-        out = att_outs + fsmn_memory
-        return out
+        return att_outs + fsmn_memory
 
 class EncoderLayerSANM(nn.Module):
     def __init__(self, in_size, size, self_attn, feed_forward, dropout_rate, normalize_before=True):
@@ -109,7 +101,11 @@ class EncoderLayerSANM(nn.Module):
         residual = x
         if self.normalize_before: x = self.norm1(x)
         x = self.self_attn(x, mask)
-        if self.in_size != self.size: return self.dropout(x), mask
+        
+        # Dimension adaptation for the first block
+        if self.in_size != self.size: 
+            return self.dropout(x), mask
+            
         x = residual + self.dropout(x)
         if not self.normalize_before: x = self.norm1(x)
         
@@ -130,12 +126,6 @@ class MultiHeadedAttention(nn.Module):
         self.linear_q, self.linear_k, self.linear_v, self.linear_out = nn.Linear(n_feat, n_feat), nn.Linear(n_feat, n_feat), nn.Linear(n_feat, n_feat), nn.Linear(n_feat, n_feat)
         self.dropout = nn.Dropout(p=dropout_rate)
 
-    def forward(self, query, key, value, mask):
-        q = self.linear_q(query).unflatten(-1, (self.h, self.d_k)).transpose(1, 2)
-        k = self.linear_k(key).unflatten(-1, (self.h, self.d_k)).transpose(1, 2)
-        v = self.linear_v(value).unflatten(-1, (self.h, self.d_k)).transpose(1, 2)
-        scores = torch.matmul(q * (self.d_k ** -0.5), k.transpose(-2, -1))
-        
     def forward(self, query, key, value, mask):
         q = self.linear_q(query).unflatten(-1, (self.h, self.d_k)).transpose(1, 2)
         k = self.linear_k(key).unflatten(-1, (self.h, self.d_k)).transpose(1, 2)
@@ -172,6 +162,28 @@ class EncoderLayer(nn.Module):
         if not self.normalize_before: x = self.norm2(x)
         return x, mask
 
+class CorrectTransformerAdaptor(nn.Module):
+    def __init__(self, downsample_rate=1, encoder_dim=512, llm_dim=1024, ffn_dim=2048, n_layer=2, **kwargs):
+        super().__init__()
+        self.k = downsample_rate
+        self.linear1, self.relu, self.linear2 = nn.Linear(encoder_dim * self.k, ffn_dim), nn.ReLU(), nn.Linear(ffn_dim, llm_dim)
+        self.blocks = nn.ModuleList([
+            EncoderLayer(
+                llm_dim, 
+                MultiHeadedAttention(kwargs.get("attention_heads", 8), llm_dim, kwargs.get("attention_dropout_rate", 0.0)), 
+                PositionwiseFeedForward(llm_dim, llm_dim // 4, kwargs.get("dropout_rate", 0.0)), 
+                kwargs.get("dropout_rate", 0.0)
+            ) for _ in range(n_layer)
+        ]) if n_layer > 0 else None
+
+    def forward(self, x, mask=None):
+        batch_size, seq_len, dim = x.size()
+        chunk_num = (seq_len - 1) // self.k + 1
+        x = self.linear2(self.relu(self.linear1(F.pad(x, (0, 0, 0, chunk_num * self.k - seq_len)).unflatten(1, (chunk_num, self.k)).flatten(2))))
+        if self.blocks is not None:
+            for block in self.blocks: x, _ = block(x, mask)
+        return x, mask
+
 # ============================================================================
 # Main Models
 # ============================================================================
@@ -181,9 +193,13 @@ class SenseVoiceEncoderSmall(nn.Module):
         super().__init__()
         self.input_size, self.output_size, self.attention_heads, self.linear_units, self.num_blocks, self.tp_blocks, self.dropout_rate, self.attention_dropout_rate, self.kernel_size = 560, 512, 4, 2048, 50, 20, 0.1, 0.1, 11
         self.embed = SinusoidalPositionEncoder()
-        self.encoders0 = nn.ModuleList([EncoderLayerSANM(560, 512, MultiHeadedAttentionSANM(4, 560, 512, 0.1, 11), PositionwiseFeedForward(512, 2048, 0.1), 0.1)])
-        self.encoders = nn.ModuleList([EncoderLayerSANM(512, 512, MultiHeadedAttentionSANM(4, 512, 512, 0.1, 11), PositionwiseFeedForward(512, 2048, 0.1), 0.1) for _ in range(self.num_blocks - 1)])
-        self.tp_encoders = nn.ModuleList([EncoderLayerSANM(512, 512, MultiHeadedAttentionSANM(4, 512, 512, 0.1, 11), PositionwiseFeedForward(512, 2048, 0.1), 0.1) for _ in range(self.tp_blocks)])
+        
+        snm_cfg = (self.attention_heads, self.output_size, self.output_size, self.attention_dropout_rate, self.kernel_size)
+        ffn_cfg = (self.output_size, self.linear_units, self.dropout_rate)
+
+        self.encoders0 = nn.ModuleList([EncoderLayerSANM(560, 512, MultiHeadedAttentionSANM(4, 560, 512, 0.1, 11), PositionwiseFeedForward(*ffn_cfg), 0.1)])
+        self.encoders = nn.ModuleList([EncoderLayerSANM(512, 512, MultiHeadedAttentionSANM(*snm_cfg), PositionwiseFeedForward(*ffn_cfg), 0.1) for _ in range(self.num_blocks - 1)])
+        self.tp_encoders = nn.ModuleList([EncoderLayerSANM(512, 512, MultiHeadedAttentionSANM(*snm_cfg), PositionwiseFeedForward(*ffn_cfg), 0.1) for _ in range(self.tp_blocks)])
         self.after_norm, self.tp_norm = LayerNorm(512), LayerNorm(512)
 
     def forward(self, x, mask):
@@ -191,33 +207,18 @@ class SenseVoiceEncoderSmall(nn.Module):
         for layer in self.encoders0: x, _ = layer(x, mask)
         for layer in self.encoders:  x, _ = layer(x, mask)
         x = self.after_norm(x)
-        if mask is not None: x = x * mask.unsqueeze(-1) # Final sweeping
+        if mask is not None: x = x * mask.unsqueeze(-1) # Fire-wall Sweeping
         for layer in self.tp_encoders: x, _ = layer(x, mask)
         x = self.tp_norm(x)
-        if mask is not None: x = x * mask.unsqueeze(-1) # Final sweeping
-        return x
-
-class CorrectTransformerAdaptor(nn.Module):
-    def __init__(self, downsample_rate=1, encoder_dim=512, llm_dim=1024, ffn_dim=2048, n_layer=2, **kwargs):
-        super().__init__()
-        self.k = downsample_rate
-        self.linear1, self.relu, self.linear2 = nn.Linear(encoder_dim * self.k, ffn_dim), nn.ReLU(), nn.Linear(ffn_dim, llm_dim)
-        self.blocks = nn.ModuleList([EncoderLayer(llm_dim, MultiHeadedAttention(kwargs.get("attention_heads", 8), llm_dim, 0.0), PositionwiseFeedForward(llm_dim, llm_dim // 4, 0.0), 0.0) for _ in range(n_layer)]) if n_layer > 0 else None
-
-    def forward(self, x, mask=None):
-        batch_size, seq_len, dim = x.size()
-        chunk_num = (seq_len - 1) // self.k + 1
-        x = self.linear2(self.relu(self.linear1(F.pad(x, (0, 0, 0, chunk_num * self.k - seq_len)).unflatten(1, (chunk_num, self.k)).flatten(2))))
-        if self.blocks is not None:
-            for block in self.blocks: x, _ = block(x, mask)
+        if mask is not None: x = x * mask.unsqueeze(-1) # Final Sweeping
         return x
 
 class CTC(nn.Module):
     def __init__(self, odim, encoder_output_size):
         super().__init__()
         self.ctc_lo = nn.Linear(encoder_output_size, odim)
-    def forward(self, hs_pad):
-        return self.ctc_lo(hs_pad)
+    def forward(self, x):
+        return self.ctc_lo(x)
 
 class HybridSenseVoice(nn.Module):
     def __init__(self, encoder_dim=512, llm_dim=1024, vocab_size=60515):
@@ -244,9 +245,9 @@ class STFT_Process(nn.Module):
     def __init__(self, n_fft=400, win_length=400, hop_len=160):
         super().__init__()
         self.n_fft, self.hop_len, self.half_n_fft = n_fft, hop_len, n_fft // 2
-        window = torch.hamming_window(win_length, periodic=True).float()
+        window = torch.hamming_window(win_length, periodic=True)
         if win_length < n_fft: window = F.pad(window, ((n_fft - win_length) // 2, n_fft - win_length - (n_fft - win_length) // 2))
-        t, f = torch.arange(n_fft).float().unsqueeze(0), torch.arange(self.half_n_fft + 1).float().unsqueeze(1)
+        t, f = torch.arange(n_fft).unsqueeze(0), torch.arange(self.half_n_fft + 1).unsqueeze(1)
         omega = 2 * torch.pi * f * t / n_fft
         self.register_buffer('cos_kernel', (torch.cos(omega) * window.unsqueeze(0)).unsqueeze(1))
         self.register_buffer('sin_kernel', (-torch.sin(omega) * window.unsqueeze(0)).unsqueeze(1))
@@ -255,7 +256,7 @@ class STFT_Process(nn.Module):
         return F.conv1d(xp, self.cos_kernel, stride=self.hop_len), F.conv1d(xp, self.sin_kernel, stride=self.hop_len)
 
 # ============================================================================
-# Optimized Paddable Wrapper
+# Export Wrappers
 # ============================================================================
 
 class EncoderExportWrapperPaddable(nn.Module):
@@ -269,18 +270,13 @@ class EncoderExportWrapperPaddable(nn.Module):
         # 0. Initial Setup
         valid_samples = ilens[0]
         batch, _, samples = audio.shape
-        # Create audio-domain mask symbolically without Reshape
-        # Using ones_like + cumsum generates (B, 1, T) indices directly
         audio_indices = torch.ones_like(audio, dtype=torch.long).cumsum(-1) - 1
-        audio_mask = (audio_indices < valid_samples).float()
+        audio_mask = (audio_indices < valid_samples).type(audio.dtype)
 
-        # 1. Length-Aware Normalization (Symbolic)
-        # mean = sum / N
+        # 1. Normalization
         sum_val = (audio * audio_mask).sum()
-        mean_val = sum_val / valid_samples.float()
+        mean_val = sum_val / valid_samples
         audio = (audio - mean_val) * audio_mask
-        
-        # Pre-emphasis (Symbolic)
         if self.pre_emphasis_val > 0:
             audio = torch.cat([audio[..., :1], audio[..., 1:] - self.pre_emphasis * audio[..., :-1]], dim=-1)
             audio = audio * audio_mask
@@ -290,51 +286,72 @@ class EncoderExportWrapperPaddable(nn.Module):
         T_mel_valid = (valid_samples // 160) + 1
         mel = (torch.matmul(self.fbank, real * real + imag * imag).transpose(1, 2) + 1e-7).log()
         
-        # 3. Corrected LFR Logic with Replicate Padding (Symbolic Gather)
+        # 3. LFR with Replicate Padding (Symbolic)
         T_phys = mel.shape[1]
         T_lfr_valid = (T_mel_valid + self.lfr_n - 1) // self.lfr_n
         T_lfr_phys = (T_phys + self.lfr_n - 1) // self.lfr_n
         
-        # --- REPLICATE STRATEGY (Symbolic version) ---
-        # Instead of slicing, we use gather to replicate the last valid frame
-        # mel is (B, T, D), mel[..., :1] is (B, T, 1)
-        mel_indices = torch.ones_like(mel[..., :1], dtype=torch.long).cumsum(1) - 1
-        # Clamping indices to max T_mel_valid - 1 effectively replicates the last valid frame
+        mel_indices = (torch.ones_like(mel[..., :1], dtype=torch.long).cumsum(1) - 1)
         gather_idx = torch.clamp(mel_indices, max=T_mel_valid - 1).expand(-1, -1, 80)
         mel_consistent = torch.gather(mel, 1, gather_idx)
         
-        # Prepare for LFR windowing
         m_half = (self.lfr_m - 1) // 2
-        # We still need cat for context padding, but sizes are now based on constants and T_lfr_phys
         left_pad = mel_consistent[:, [0]].repeat(1, m_half, 1)
-        # Calculate right pad size symbolically
         right_pad_len = (T_lfr_phys * self.lfr_n + self.lfr_m) - T_phys
         right_pad = mel_consistent[:, [T_phys - 1]].repeat(1, right_pad_len, 1)
         padded = torch.cat([left_pad, mel_consistent, right_pad], dim=1)
         
         lfr_list = []
         for i in range(self.lfr_m):
-            # Slicing with constant step and symbolic T_lfr_phys is ONNX compatible
             feat = padded[:, i : i + T_lfr_phys * self.lfr_n : self.lfr_n]
             lfr_list.append(feat[:, :T_lfr_phys, :])
         x = torch.cat(lfr_list, dim=-1)
         
-        # 4. Masking
-        m = (torch.arange(T_lfr_phys, device=x.device).unsqueeze(0) < T_lfr_valid).float()
+        m = (torch.arange(T_lfr_phys, device=x.device).unsqueeze(0) < T_lfr_valid).type(audio.dtype)
         x = x * m.unsqueeze(-1)
         
-        # 5. Model
         enc = self.hybrid_model.audio_encoder(x, m)
-        adapt = self.hybrid_model.audio_adaptor(enc, m)
+        adapt, _ = self.hybrid_model.audio_adaptor(enc, m)
         
-        # Target length calculation (All symbolic)
+        # 5. Length Control
         olens_1 = 1 + (T_lfr_valid - 3 + 2) // 2
         target_len = (1 + (olens_1 - 3 + 2) // 2 - 1) // 2 + 1
         
-        # One last symbolic slice for the final output
-        # Use ones_like + cumsum to avoid arange.unsqueeze for better DML compatibility
         output_indices = (torch.ones_like(adapt[..., :1], dtype=torch.long).cumsum(1) - 1).squeeze(-1)
-        final_mask = (output_indices < target_len).unsqueeze(-1)
-        final_output = adapt * final_mask
+        final_output = adapt * (output_indices < target_len).unsqueeze(-1)
         
         return enc, final_output
+
+class EncoderExportWrapper(EncoderExportWrapperPaddable):
+    """Legacy Wrapper for compatibility with 01-Export script"""
+    def forward(self, audio):
+        ilens = torch.tensor([audio.shape[-1]], dtype=torch.long, device=audio.device)
+        return super().forward(audio, ilens)
+
+class CTCHeadExportWrapper(nn.Module):
+    def __init__(self, hybrid_model, topk=30):
+        super().__init__()
+        self.ctc_decoder, self.ctc_proj = hybrid_model.ctc_decoder, hybrid_model.ctc_proj
+        self.topk = topk
+    def forward(self, enc_output):
+        h, _ = self.ctc_decoder(enc_output, None)
+        logits = self.ctc_proj.ctc_lo(h)
+        log_probs = torch.log_softmax(logits, dim=-1)
+        topk_log_probs, topk_indices = torch.topk(log_probs, self.topk, dim=-1)
+        return topk_log_probs, topk_indices.to(torch.int32)
+
+class CleanEncoderExportWrapper(nn.Module):
+    """
+    Experimental Clean Encoder Wrapper (Input: LFR Features, Mask)
+    Stripped of STFT, Mel, and LFR logic.
+    """
+    def __init__(self, hybrid_model):
+        super().__init__()
+        self.hybrid_model = hybrid_model
+
+    def forward(self, lfr_feat, mask):
+        # lfr_feat: (Batch, T, 560)
+        # mask: (Batch, T) 
+        enc = self.hybrid_model.audio_encoder(lfr_feat, mask)
+        adapt, _ = self.hybrid_model.audio_adaptor(enc, mask)
+        return enc, adapt

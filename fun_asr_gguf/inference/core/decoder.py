@@ -1,50 +1,19 @@
 import time
+import re
 import ctypes
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 
+from . import logger
 from .. import llama
-from ..nano_ctc import decode_ctc, align_timestamps
-from ..nano_onnx import encode_audio
+from ..ctc import align_timestamps, CTCDecoder
 from ..utils import vprint
-from ..nano_dataclass import DecodeResult, Timings, RecognitionStream, LLMDecodeResult
+from ..schema import DecodeResult, Timings, RecognitionStream, LLMDecodeResult
 from ..display import DisplayReporter
 from .model_manager import ModelManager
 
-class CTCDecoder:
-    """负责 CTC 推理和热词匹配"""
-    def __init__(self, models: ModelManager):
-        self.models = models
-
-    def decode(self, enc_output: np.ndarray, enable_ctc: bool, max_hotwords: int) -> Tuple[List, List[str], Dict[str, float]]:
-        t_stats = {"infer": 0.0, "decode": 0.0, "hotword": 0.0}
-        
-        if not enable_ctc or self.models.ctc_sess is None:
-            return [], [], t_stats
-
-        # 1. Inference
-        t0 = time.perf_counter()
-        ctc_logits = self.models.ctc_sess.run(None, {"enc_output": enc_output})[0]
-        t_stats["infer"] = time.perf_counter() - t0
-
-        # 2. Decoding
-        t0 = time.perf_counter()
-        ctc_text, ctc_results, ctc_details = decode_ctc(ctc_logits, self.models.ctc_id2token)
-        t_stats["decode"] = time.perf_counter() - t0
-        t_stats.update(ctc_details) # cast, argmax, loop
-
-        hotwords = []
-        # 3. Hotword Verification
-        t0 = time.perf_counter()
-        if self.models.corrector and self.models.corrector.hotwords and ctc_text:
-            res = self.models.corrector.correct(ctc_text, k=max_hotwords)
-            candidates = set()
-            for _, hw, _ in res.matchs: candidates.add(hw)
-            for _, hw, _ in res.similars: candidates.add(hw)
-            hotwords = list(candidates)
-        t_stats["hotword"] = time.perf_counter() - t0
-            
-        return ctc_results, hotwords, t_stats
+# 全局静默 Reporter，用于默认参数，避免重复创建线程
+_SILENT_REPORTER = DisplayReporter(verbose=False)
 
 class LLMDecoder:
     """负责 LLM 推理循环"""
@@ -112,6 +81,14 @@ class LLMDecoder:
                 if len(set(asr_decoder.tokens[-30:])) <= 3:
                     res.is_aborted = True
                     break
+
+                # 达到30个token时还没生成标点，熔断
+                if len(asr_decoder.tokens) == 30: 
+                    if not re.search(r'[，。？！、；：,\.?!;:]', asr_decoder.generated_text):
+                        res.is_aborted = True
+                        break
+
+
         
         asr_decoder.flush()
 
@@ -122,11 +99,11 @@ class LLMDecoder:
         
         return res
 
+
 class StreamDecoder:
     """协调完整流程的解码器"""
     def __init__(self, models: ModelManager):
         self.models = models
-        self.ctc_decoder = CTCDecoder(models)
         self.llm_decoder = LLMDecoder(models)
 
     def decode_stream(
@@ -138,68 +115,65 @@ class StreamDecoder:
         reporter: Optional[DisplayReporter] = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
-        top_k: int = 50
+        top_k: int = 50,
+        timestamp_offset: float = -0.24
     ) -> DecodeResult:
+        
+        reporter = reporter or _SILENT_REPORTER
         
         timings = Timings()
         
         # 1. Encode
-        if reporter: reporter.print("\n[2] 音频编码...")
+        reporter.print("\n[2] 音频编码...")
         t_s = time.perf_counter()
-        audio_embd, enc_output = encode_audio(stream.audio_data, self.models.encoder_sess)
+        audio_embd, enc_output = self.models.encoder.encode(stream.audio_data)
         timings.encode = time.perf_counter() - t_s
-        if reporter: reporter.print(f"    耗时: {timings.encode*1000:.2f}ms")
+        reporter.print(f"    耗时: {timings.encode*1000:.2f}ms")
 
-        # 2. CTC
-        if reporter: reporter.print("\n[3] CTC 解码...")
+        reporter.print("\n[3] CTC 解码...")
         t_s = time.perf_counter()
-        ctc_results, hotwords, ctc_times = self.ctc_decoder.decode(
+        ctc_results, hotwords, ctc_times = self.models.ctc_decoder.decode(
             enc_output, 
             self.models.config.enable_ctc, 
-            self.models.config.max_hotwords
+            self.models.config.max_hotwords, 
+            top_k = self.models.config.ctc_topk
         )
         timings.ctc = time.perf_counter() - t_s
-        timings.ctc_infer = ctc_times["infer"]
-        timings.ctc_decode = ctc_times["decode"]
-        timings.hotword_verify = ctc_times["hotword"]
         
-        # Store micro-stats dynamically to avoid modifying dataclass too much if not needed
-        # Or ideally extend Timings dataclass. For now let's just setattr
-        timings.ctc_cast = ctc_times.get("cast", 0.0)
-        timings.ctc_argmax = ctc_times.get("argmax", 0.0)
-        timings.ctc_loop = ctc_times.get("loop", 0.0)
-        
-        if verbose and ctc_results:
+        if reporter.verbose and ctc_results:
             ctc_text = "".join([r.text for r in ctc_results])
-            if reporter:
-                reporter.print(f"    CTC: {ctc_text}")
-                if hotwords: reporter.print(f"    热词: {hotwords}")
-        if reporter: 
-            reporter.print(f"    耗时: {timings.ctc*1000:.2f}ms (Infer: {timings.ctc_infer*1000:.0f}ms, "
-                           f"Dec: {timings.ctc_decode*1000:.0f}ms, "
-                           f"HW: {timings.hotword_verify*1000:.0f}ms)")
+            reporter.print(f"    CTC: {ctc_text}")
+            if hotwords: reporter.print(f"    热词: {hotwords}")
+        
+        # 详细耗时详情
+        t_detail = " | ".join([f"{k}:{v*1000:.1f}ms" for k, v in ctc_times.items() if v > 0])
+        reporter.print(f"    耗时: {timings.ctc*1000:.2f}ms ({t_detail})")
 
         # 3. Prompt
-        if reporter: reporter.print("\n[4] 准备 Prompt...")
+        reporter.print("\n[4] 准备 Prompt...")
+        
         t_s = time.perf_counter()
         p_embd, s_embd, n_p, n_s, p_text = self.models.prompt_builder.build_prompt(hotwords, language, context)
-        timings.prepare = time.perf_counter() - t_s
         
-        if verbose and reporter:
+        # 确保属性已初始化
+        if not hasattr(timings, 'prepare'): timings.prepare = 0.0
+        timings.prepare += (time.perf_counter() - t_s)
+        
+        if reporter.verbose and reporter.skip_technical is False:
             reporter.print("-" * 15 + " Prefix Prompt " + "-" * 15 + "\n" + p_text + "\n" + "-" * 40)
-        if reporter:
-            reporter.print(f"    Prefix: {n_p} tokens")
-            reporter.print(f"    Suffix: {n_s} tokens")
+        
+        reporter.print(f"    Prefix: {n_p} tokens")
+        reporter.print(f"    Suffix: {n_s} tokens")
 
         # 4. LLM
-        if reporter:
-            reporter.print("\n[5] LLM 解码...")
-            reporter.print("=" * 70)
+        reporter.print("\n[5] LLM 解码...")
+        reporter.print("=" * 70)
         
         full_embd = np.concatenate([p_embd, audio_embd.astype(np.float32), s_embd], axis=0)
-        
-        # LLM 解码循环：若熔断则加温重试（最多重试 5 次）
-        for _ in range(6):
+
+        # LLM 解码循环：若熔断则加温重试（最多重试 3 次）
+        text = ""
+        for _ in range(4):
             llm_res = self.llm_decoder.decode(
                 full_embd, full_embd.shape[0], self.models.config.n_predict, 
                 stream_output=verbose, reporter=reporter,
@@ -208,16 +182,18 @@ class StreamDecoder:
             if not llm_res.is_aborted: break
             temperature += 0.3
             llm_res.text += "====解码有误，强制熔断===="
-            print(f"\n\n[!] 触发重试 (Temp -> {temperature:.1f})\n")
+            print(f"\n\n[!] 解码有误，熔断重试 (温度设为 {temperature:.1f})\n")
 
         text = llm_res.text.strip()
         timings.inject = llm_res.t_inject
         timings.llm_generate = llm_res.t_gen
         
         if reporter: reporter.print("\n" + "=" * 70)
+        reporter.print("\n" + "=" * 70)
+
 
         # 5. Align
-        if reporter: reporter.print("\n[6] 时间戳对齐")
+        reporter.print("\n[6] 时间戳对齐")
         t_s = time.perf_counter()
         aligned = None
         timestamps = []
@@ -229,7 +205,12 @@ class StreamDecoder:
                 timestamps = [seg['start'] for seg in aligned]
         timings.align = time.perf_counter() - t_s
         
-        if reporter and aligned:
+        # 应用时间戳偏移（只影响字幕输出，不影响 integrate 和 radar）
+        if aligned and timestamp_offset != 0.0:
+            for seg in aligned:
+                seg['start'] = max(seg['start'] + timestamp_offset, 0.0)
+        
+        if aligned:
             reporter.print(f"    对齐耗时: {timings.align*1000:.2f}ms")
             preview = " ".join([f"{r['char']}({r['start']:.2f}s)" for r in aligned[:10]])
             if len(aligned) > 10: preview += " ..."
@@ -244,3 +225,5 @@ class StreamDecoder:
             n_gen=llm_res.n_gen, timings=timings, hotwords=hotwords,
             is_aborted=llm_res.is_aborted
         )
+
+

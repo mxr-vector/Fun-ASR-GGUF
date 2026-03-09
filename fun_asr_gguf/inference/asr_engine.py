@@ -8,44 +8,24 @@ ASR 推理引擎入口点 (Facade)
 import os
 from typing import Optional
 
-from .nano_dataclass import ASREngineConfig, TranscriptionResult, RecognitionStream, DecodeResult
+from .schema import ASREngineConfig, TranscriptionResult, RecognitionStream, DecodeResult
 from .core.model_manager import ModelManager
 from .core.orchestrator import TranscriptionOrchestrator
 
 class FunASREngine:
     """FunASR 推理引擎 (Facade 模式)"""
 
-    def __init__(
-        self,
-        encoder_onnx_path: str,
-        ctc_onnx_path: str,
-        decoder_gguf_path: str,
-        tokens_path: str,
-        hotwords_path: str = None,
-        enable_ctc: bool = True,
-        n_predict: int = 512,
-        n_threads: int = None,
-        similar_threshold: float = 0.6,
-        max_hotwords: int = 10,
-    ):
+    def __init__(self, config: ASREngineConfig):
         # 封装配置
-        self.config = ASREngineConfig(
-            encoder_onnx_path=encoder_onnx_path,
-            ctc_onnx_path=ctc_onnx_path,
-            decoder_gguf_path=decoder_gguf_path,
-            tokens_path=tokens_path,
-            hotwords_path=hotwords_path,
-            enable_ctc=enable_ctc,
-            n_predict=n_predict,
-            n_threads=n_threads,
-            similar_threshold=similar_threshold,
-            max_hotwords=max_hotwords
-        )
+        self.config = config
 
         # 初始化组件
         self.models = ModelManager(self.config)
         self.orchestrator = TranscriptionOrchestrator(self.models)
         self.sample_rate = self.config.sample_rate
+        
+        # [自动化] 构造时即完成初始化
+        self.initialize(verbose=self.config.verbose)
 
     def initialize(self, verbose: bool = True) -> bool:
         """初始化模型资源"""
@@ -116,21 +96,36 @@ def create_asr_engine(
     tokens_path: str,
     hotwords_path: str = None,
     enable_ctc: bool = True,
+    n_predict: int = 512,
+    n_threads: int = None,
     similar_threshold: float = 0.6,
     max_hotwords: int = 10,
+    onnx_provider: str = 'CPU',
+    ctc_topk: int = 20,
+    dml_pad_to: int = 30, 
+    vulkan_enable: bool = True,
+    vulkan_force_fp32: bool = False,
     verbose: bool = True,
 ) -> FunASREngine:
     """创建并初始化 ASR 引擎的快捷入口"""
-    engine = FunASREngine(
+    config = ASREngineConfig(
         encoder_onnx_path=encoder_onnx_path,
         ctc_onnx_path=ctc_onnx_path,
         decoder_gguf_path=decoder_gguf_path,
         tokens_path=tokens_path,
         hotwords_path=hotwords_path,
         enable_ctc=enable_ctc,
+        n_predict=n_predict,
+        n_threads=n_threads,
         similar_threshold=similar_threshold,
         max_hotwords=max_hotwords,
+        onnx_provider=onnx_provider,
+        ctc_topk=ctc_topk,
+        dml_pad_to=dml_pad_to,
+        vulkan_enable=vulkan_enable,
+        vulkan_force_fp32=vulkan_force_fp32,
+        verbose=verbose,
     )
-    if not engine.initialize(verbose=verbose):
-        raise RuntimeError("Failed to initialize ASR engine")
-    return engine
+    
+    return FunASREngine(config)
+

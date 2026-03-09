@@ -77,28 +77,23 @@ class Timings:
     Attributes:
         encode: 音频编码耗时
         ctc: CTC 解码耗时
+        radar: 雷达扫描耗时
         prepare: Prompt 准备耗时
         inject: LLM embeddings 注入耗时
         llm_generate: LLM 文本生成耗时
         align: 时间戳对齐耗时
+        integrate: 文本整合耗时
         total: 总耗时
     """
     encode: float = 0.0
-    load_audio: float = 0.0
     ctc: float = 0.0
+    radar: float = 0.0
     prepare: float = 0.0
     inject: float = 0.0
     llm_generate: float = 0.0
     align: float = 0.0
+    integrate: float = 0.0
     total: float = 0.0
-    
-    # Detailed stats
-    ctc_infer: float = 0.0
-    ctc_decode: float = 0.0
-    ctc_cast: float = 0.0
-    ctc_argmax: float = 0.0
-    ctc_loop: float = 0.0
-    hotword_verify: float = 0.0
 
 
 @dataclass
@@ -141,6 +136,10 @@ class ASREngineConfig:
         similar_threshold: 热词相似度阈值
         max_hotwords: 召回并发送给 LLM 的最大热词数
         sample_rate: 音频采样率
+        onnx_provider: 推理后端 (CPU, CUDA, DML, TensorRT)
+        ctc_topk: CTC 解码时的 Top-K 深度
+        dml_pad_to: DML 专用填充长度（秒）
+        verbose: 是否打印详细加载日志
     """
     encoder_onnx_path: str
     ctc_onnx_path: str
@@ -155,6 +154,12 @@ class ASREngineConfig:
     similar_threshold: float = 0.6
     max_hotwords: int = 10
     sample_rate: int = 16000
+    onnx_provider: str = 'CPU'  # CPU, CUDA, DML, TensorRT
+    ctc_topk: int = 20
+    dml_pad_to: int = 30
+    vulkan_enable: bool = True
+    vulkan_force_fp32: bool = False
+    verbose: bool = True
 
 
 # ==================== CTC 结果相关 ====================
@@ -239,7 +244,6 @@ class DecodeResult:
     timings: Timings = field(default_factory=Timings)
     hotwords: List[str] = field(default_factory=list)
     is_aborted: bool = False
-
 
 @dataclass
 class LLMDecodeResult:

@@ -79,7 +79,7 @@ class ASRService:
                 self.engine.orchestrator, "decoder"
             ):
                 # 重新创建decoder，清理KV缓存和生成状态
-                from fun_asr_gguf.core.decoder import StreamDecoder
+                from fun_asr_gguf.inference.core.decoder import StreamDecoder
 
                 self.engine.orchestrator.decoder = StreamDecoder(self.engine.models)
 

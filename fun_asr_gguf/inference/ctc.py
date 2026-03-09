@@ -342,7 +342,7 @@ def align_timestamps(ctc_results, llm_text):
             char_duration = 0.08  # 默认每个字符约 80ms
             for i, char in enumerate(text):
                 c_start = start + i * char_duration
-                ctc_chars.append({"char": char, "start": c_start})
+                ctc_chars.append({"token": char, "start": c_start})
 
     llm_chars = list(llm_text)
 
@@ -365,7 +365,7 @@ def align_timestamps(ctc_results, llm_text):
     # Fill DP
     for i in range(1, n):
         for j in range(1, m):
-            char_ctc = ctc_chars[i-1]["char"]
+            char_ctc = ctc_chars[i-1]["token"]
             char_llm = llm_chars[j-1]
 
             s_diag = score[i-1][j-1] + (match_score if char_ctc.lower() == char_llm.lower() else mismatch_score)
@@ -435,7 +435,7 @@ def align_timestamps(ctc_results, llm_text):
             s = llm_alignment[idx]["start"]
         else:
             s = get_interpolated_start(idx)
-        final_chars.append({"char": char, "start": s})
+        final_chars.append({"token": char, "start": s})
 
     return final_chars
 

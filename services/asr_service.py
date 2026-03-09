@@ -4,6 +4,7 @@ from core.config import settings
 from fun_asr_gguf import FunASREngine, ASREngineConfig
 from core.logger import logger
 
+
 class ASRService:
     def __init__(self):
         self.engine = None
@@ -38,6 +39,7 @@ class ASRService:
             similar_threshold=settings.SIMILAR_THRESHOLD,
             max_hotwords=settings.MAX_HOTWORDS,
             enable_ctc=settings.ENABLE_CTC,
+            onnx_provider="cuda",
             verbose=False,
         )
         self.engine = FunASREngine(config)
@@ -50,7 +52,9 @@ class ASRService:
             self.engine = None
         self._executor.shutdown(wait=True)
 
-    def _transcribe_sync(self, filepath: str, language: str = None, context: str = None) -> dict:
+    def _transcribe_sync(
+        self, filepath: str, language: str = None, context: str = None
+    ) -> dict:
         if not self.engine:
             raise RuntimeError("ASR 引擎尚未初始化")
 
@@ -67,19 +71,18 @@ class ASRService:
         if isinstance(result, dict):
             return result
         import dataclasses
+
         if dataclasses.is_dataclass(result):
             return dataclasses.asdict(result)
         return {"text": str(result)}
 
-    async def transcribe_async(self, filepath: str, language: str = None, context: str = None) -> dict:
+    async def transcribe_async(
+        self, filepath: str, language: str = None, context: str = None
+    ) -> dict:
         async with self._lock:
             loop = asyncio.get_running_loop()
             result_dict = await loop.run_in_executor(
-                self._executor, 
-                self._transcribe_sync, 
-                filepath, 
-                language, 
-                context
+                self._executor, self._transcribe_sync, filepath, language, context
             )
             return result_dict
 
@@ -110,13 +113,20 @@ class ASRService:
             f.write(content + "\n")
 
         # 触发立即重载
-        if self.engine and getattr(self.engine, "models", None) and getattr(self.engine.models, "hotword_manager", None):
+        if (
+            self.engine
+            and getattr(self.engine, "models", None)
+            and getattr(self.engine.models, "hotword_manager", None)
+        ):
             self.engine.models.hotword_manager._load_hot()
             try:
-                return len(self.engine.models.hotword_manager.phoneme_corrector.hotwords)
+                return len(
+                    self.engine.models.hotword_manager.phoneme_corrector.hotwords
+                )
             except AttributeError:
                 pass
 
         return len(words)
+
 
 asr_service = ASRService()

@@ -9,16 +9,11 @@ import json
 import time
 from fun_asr_gguf import create_asr_engine
 
-
 # ==================== 配置区域 ====================
 
-# 音频文件目录
-data_dir = "./datasets"
-
-# 支持的音频扩展名
+data_dir = "./datasets"  # 音频文件目录
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
 
-# 模型文件路径
 model_dir = "./model"
 encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx"
 ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.fp16.onnx"
@@ -26,10 +21,8 @@ decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.fp16.gguf"
 tokens_path = f"{model_dir}/tokens.txt"
 hotwords_path = "./hot-word.txt"
 
-# 语言设置（None=自动检测）
-language = None
+language = None  # None=自动检测
 
-# 上下文信息（留空则不使用）
 context = (
     "这是民航空中交通管制（ATC）地空通话录音，通话语言为中英文混合。"
     "说话人为管制员或飞行员，内容涉及起飞、落地、滑行、航向、高度、速度等指令。"
@@ -42,23 +35,22 @@ context = (
     "跑道编号、频率读报、应答机编码、高度层和航向角度。"
 )
 
-# 是否启用 CTC 辅助
 enable_ctc = True
-
-# 输出结果文件
 output_json = "transcribe_results.json"
 
-# ==================== 主逻辑 ====================
+# ==================== 工具函数 ====================
 
 
 def collect_audio_files(directory):
     """收集目录中所有音频文件，按文件名排序"""
-    audio_files = []
-    for filename in sorted(os.listdir(directory)):
-        ext = os.path.splitext(filename)[1].lower()
-        if ext in AUDIO_EXTENSIONS:
-            audio_files.append(filename)
-    return audio_files
+    return [
+        f
+        for f in sorted(os.listdir(directory))
+        if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS
+    ]
+
+
+# ==================== 主流程 ====================
 
 
 def main():
@@ -66,7 +58,6 @@ def main():
     print("批量 ASR 转写")
     print("=" * 70)
 
-    # 收集音频文件
     audio_files = collect_audio_files(data_dir)
     if not audio_files:
         print(f"在 {data_dir} 中未找到音频文件。")
@@ -76,7 +67,6 @@ def main():
     for f in audio_files:
         print(f"  - {f}")
 
-    # 创建 ASR 引擎
     print("\n正在加载模型...")
     engine = create_asr_engine(
         encoder_onnx_path=encoder_onnx_path,
@@ -93,9 +83,13 @@ def main():
     # 预跑一遍，分配内存
     print("预跑一遍，分配内存...")
     first_file = os.path.join(data_dir, audio_files[0])
-    engine.transcribe(first_file, language=language, context=context, verbose=False, duration=5.0)
+    try:
+        engine.transcribe(
+            first_file, language=language, context=context, verbose=False, duration=5.0
+        )
+    except Exception as e:
+        print(f"⚠ 预跑失败: {e}")
 
-    # 逐个转写
     results = {}
     total = len(audio_files)
 
@@ -116,39 +110,27 @@ def main():
                 verbose=False,
                 segment_size=60.0,
                 overlap=4.0,
-                temperature=0.2,
+                temperature=0.0,
             )
             cost = time.time() - start_time
 
-            # 提取纯文本
-            text = result.get("text", "") if isinstance(result, dict) else str(result)
+            # 只保留纯文本
+            text = getattr(result, "text", "") if result else ""
             results[filename] = text
 
             print(f"  耗时: {cost:.1f}s")
-            print(f"  结果: {text[:200]}{'...' if len(text) > 200 else ''}")
-            print()
+            print(f"  结果: {text[:200]}{'...' if len(text) > 200 else ''}\n")
 
         except Exception as e:
             cost = time.time() - start_time
-            print(f"  ✗ 失败 ({cost:.1f}s): {e}")
-            results[filename] = f"[ERROR] {e}" 
-            print()
+            print(f"  ✗ 失败 ({cost:.1f}s): {e}\n")
+            results[filename] = f"[ERROR] {e}"
 
-    # 保存结果到 JSON
+    # 保存 JSON
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-
-    # 打印汇总
-    print("=" * 70)
-    print("转写完成！结果汇总：")
-    print("=" * 70)
-    for filename, text in results.items():
-        print(f"\n📄 {filename}")
-        print(f"   {text}")
-
     print(f"\n结果已保存到: {output_json}")
 
-    # 清理资源
     engine.cleanup()
     return 0
 

@@ -3,12 +3,11 @@ import sys
 import warnings
 import logging
 import torch
-import torchaudio
 import numpy as np
 import base64
 from pathlib import Path
 from export_config import MODEL_DIR, EXPORT_DIR
-import fun_asr_gguf.model_definition as model_def
+import fun_asr_gguf.export.model_definition as model_def
 
 # Suppress warnings
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -88,16 +87,18 @@ def main():
         dummy_lfr = torch.randn(1, 17, 560)
         dummy_mask = torch.ones(1, 17)
         
+        # Define dynamic symbols for Encoder
+        lfr_frames = torch.export.Dim("lfr_frames", min=2, max=16384)
+        
         torch.onnx.export(
             enc_wrapper, (dummy_lfr, dummy_mask), ONNX_ENCODER_FP32,
             input_names=['lfr_feat', 'mask'], 
             output_names=['enc_output', 'adaptor_output'],
-            dynamic_axes={
-                'lfr_feat': {1: 'lfr_frames'}, 
-                'mask': {1: 'lfr_frames'},
-                'enc_output': {1: 'enc_frames'}, 
-                'adaptor_output': {1: 'adaptor_frames'}
+            dynamic_shapes={
+                'lfr_feat': {1: lfr_frames}, 
+                'mask': {1: lfr_frames}
             },
+            # Note: outputs will automatically be inferred as dynamic based on the inputs
             opset_version=OPSET,
             dynamo=True
         )
@@ -105,10 +106,17 @@ def main():
         print(f"\n[2/2] Exporting Clean CTC Head...")
         ctc_wrapper = model_def.CTCHeadExportWrapper(hybrid).eval()
         dummy_enc = torch.randn(1, 100, 512)
+        
+        # Define dynamic symbols for CTC
+        enc_len = torch.export.Dim("enc_len", min=2, max=16384)
+        
         torch.onnx.export(
             ctc_wrapper, (dummy_enc,), ONNX_CTC_FP32,
-            input_names=['enc_output'], output_names=['indices'],
-            dynamic_axes={'enc_output': {1: 'enc_len'}, 'indices': {1: 'enc_len'}},
+            input_names=['enc_output'], 
+            output_names=['topk_log_probs', 'topk_indices'],
+            dynamic_shapes={
+                'enc_output': {1: enc_len}
+            },
             opset_version=OPSET,
             dynamo=True
         )

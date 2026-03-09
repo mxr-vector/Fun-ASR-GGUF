@@ -6,9 +6,9 @@ FunASR-GGUF: 混合 ASR 推理引擎
 API 兼容 sherpa-onnx，可直接替换使用。
 """
 
-import logging
 import sys
 import os
+import logging
 
 def setup_logging(level: int = logging.WARNING, log_file: str = os.path.join("logs", "latest.log")):
     """
@@ -26,7 +26,6 @@ def setup_logging(level: int = logging.WARNING, log_file: str = os.path.join("lo
     root_logger.setLevel(logging.DEBUG)  # 接收所有级别的日志
     root_logger.handlers.clear()  # 清除已有处理器
 
-
     # 文件处理器
     if log_file:
         log_dir = os.path.dirname(log_file)
@@ -43,18 +42,22 @@ def setup_logging(level: int = logging.WARNING, log_file: str = os.path.join("lo
 
     return root_logger
 
-
-# 初始化默认日志配置（默认 WARNING 级别，记录到 logs/latest.log）
-logger = setup_logging(level=logging.WARNING)
-
+try:
+    from util import get_logger
+    from util.server import console 
+    logger = get_logger('server')
+except:
+    from rich.console import Console
+    console = Console(highlight=False)
+    logger = setup_logging(level=logging.WARNING)
 
 # ==================== 导入主要组件 ====================
 
-from .asr_engine import (
+from .inference.asr_engine import (
     FunASREngine,
     create_asr_engine,
 )
-from .nano_dataclass import (
+from .inference.schema import (
     RecognitionResult,
     RecognitionStream,
     TranscriptionResult,
@@ -79,9 +82,10 @@ __all__ = [
     'TranscriptionResult',
     'DecodeResult',
 
-
     # 配置和统计
     'Timings',
     'ASREngineConfig',
     'Statistics',
+
+    'console', 
 ]

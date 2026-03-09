@@ -23,7 +23,7 @@
 推理需要：
 
 ```bash
-uv sync --extra cpu
+uv sync --extra cu128
 uv pip install transformers modelscope
 ```
 
@@ -45,8 +45,6 @@ uv pip install transformers modelscope
 #### 下载原始模型
 
 ```bash
-uv pip install modelscope
-
 # 模型下载后会默认存放到 ~/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-Nano-2512 
 modelscope download --model FunAudioLLM/Fun-ASR-Nano-2512 
 ```
@@ -148,7 +146,7 @@ print(result.text)
 ### 显存占用
 
  - **Encoder + CTC**
-   - INT4：模型 142MB，30s音频推理446MB 
+   - INT4：模型 187MB，30s音频推理394MB 
  - **LLM Decoder**（约 600M 参数）
    - Q5_K：模型 431MB，2048上下文224M，推理 298MB 
 

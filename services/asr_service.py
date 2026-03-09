@@ -4,10 +4,11 @@ from core.config import settings
 from fun_asr_gguf import create_asr_engine
 from core.logger import logger
 
+
 class ASRService:
     def __init__(self):
         self.engine = None
-        
+
         # --- 生产级并发与线程安全处理规则 ---
         # `fun_asr_gguf` 中的 llama.cpp / ONNX 模型和 PyTorch 实例
         # 占用大量内存，并且在执行推理时保持内部状态。
@@ -27,7 +28,7 @@ class ASRService:
     def initialize(self):
         if self.engine is not None:
             return
-            
+
         logger.info("正在初始化 ASR 引擎...")
         self.engine = create_asr_engine(
             encoder_onnx_path=settings.encoder_onnx_path,
@@ -49,36 +50,60 @@ class ASRService:
             self.engine = None
         self._executor.shutdown(wait=True)
 
-    def _transcribe_sync(self, filepath: str, language: str = None, context: str = None) -> dict:
+    def _transcribe_sync(
+        self, filepath: str, language: str = None, context: str = None
+    ) -> dict:
         if not self.engine:
-             raise RuntimeError("ASR 引擎尚未初始化")
-            
+            raise RuntimeError("ASR 引擎尚未初始化")
+
         result = self.engine.transcribe(
             filepath,
             language=language,
             context=context,
             verbose=False,
-            # 使用与 batch_transcribe 相同的默认片段参数
             segment_size=60.0,
             overlap=4.0,
-            temperature=0.0,
+            start_second=0.0,
+            duration=None,
+            temperature=0.4,
         )
+
+        # 关键修复：清理decoder状态，防止单例引擎内部状态污染
+        # 问题根源：06-Inference.py每次运行新建->初始化->预热->转写->cleanup
+        #         web service使用单例，长期运行，从未cleanup，导致内部状态污染
+        # 解决方案：每次转写后，重置decoder和模型上下文，模拟cleanup的效果
+        try:
+            if self.engine.orchestrator and hasattr(
+                self.engine.orchestrator, "decoder"
+            ):
+                # 重新创建decoder，清理KV缓存和生成状态
+                from fun_asr_gguf.core.decoder import StreamDecoder
+
+                self.engine.orchestrator.decoder = StreamDecoder(self.engine.models)
+
+            # 显式清理模型的LLM上下文KV缓存
+            if self.engine.models and self.engine.models.ctx:
+                self.engine.models.ctx.clear_kv_cache()
+
+            logger.debug("已清理decoder和KV缓存")
+        except Exception as e:
+            logger.warning(f"状态清理失败（继续处理）: {e}")
+
         if isinstance(result, dict):
             return result
         import dataclasses
+
         if dataclasses.is_dataclass(result):
             return dataclasses.asdict(result)
         return {"text": str(result)}
 
-    async def transcribe_async(self, filepath: str, language: str = None, context: str = None) -> dict:
+    async def transcribe_async(
+        self, filepath: str, language: str = None, context: str = None
+    ) -> dict:
         async with self._lock:
             loop = asyncio.get_running_loop()
             result_dict = await loop.run_in_executor(
-                self._executor, 
-                self._transcribe_sync, 
-                filepath, 
-                language, 
-                context
+                self._executor, self._transcribe_sync, filepath, language, context
             )
             return result_dict
 
@@ -88,7 +113,7 @@ class ASRService:
             return []
         if getattr(self.engine.models, "hotword_manager", None) is None:
             return []
-        
+
         # 从字典键中获取当前的所有热词, 位于 phoneme_corrector 中
         try:
             hw_dict = self.engine.models.hotword_manager.phoneme_corrector.hotwords
@@ -100,22 +125,29 @@ class ASRService:
         """更新热词文件并触发内存重载"""
         # 将列表写入文件
         content = "\n".join(words)
-        
+
         path = settings.HOTWORDS_PATH
         if not path:
             raise ValueError("热词文件路径未配置")
-            
+
         with open(path, "w", encoding="utf-8") as f:
             f.write(content + "\n")
-            
+
         # 触发立即重载
-        if self.engine and getattr(self.engine, "models", None) and getattr(self.engine.models, "hotword_manager", None):
+        if (
+            self.engine
+            and getattr(self.engine, "models", None)
+            and getattr(self.engine.models, "hotword_manager", None)
+        ):
             self.engine.models.hotword_manager._load_hot()
             try:
-                return len(self.engine.models.hotword_manager.phoneme_corrector.hotwords)
+                return len(
+                    self.engine.models.hotword_manager.phoneme_corrector.hotwords
+                )
             except AttributeError:
                 pass
-                
+
         return len(words)
+
 
 asr_service = ASRService()

@@ -33,7 +33,7 @@ verbose = True
 # 是否以 JSON 格式输出结果
 json_output = False
 
-# 是否生成 SRT 字幕文件
+# 是否生成 srt 字幕
 srt = False
 # 模型文件路径
 model_dir = "./model"

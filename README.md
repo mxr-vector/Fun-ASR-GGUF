@@ -23,7 +23,7 @@
 推理需要：
 
 ```bash
-uv sync --extra cpu
+uv sync --extra cu128
 uv pip install transformers modelscope
 ```
 
@@ -45,8 +45,6 @@ uv pip install transformers modelscope
 #### 下载原始模型
 
 ```bash
-uv pip install modelscope
-
 # 模型下载后会默认存放到 ~/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-Nano-2512 
 modelscope download --model FunAudioLLM/Fun-ASR-Nano-2512 
 ```

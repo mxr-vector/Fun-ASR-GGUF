@@ -39,6 +39,7 @@ class ASRService:
             similar_threshold=settings.SIMILAR_THRESHOLD,
             max_hotwords=settings.MAX_HOTWORDS,
             enable_ctc=settings.ENABLE_CTC,
+            onnx_provider="cuda",
             verbose=False,
         )
         self.engine = FunASREngine(config)

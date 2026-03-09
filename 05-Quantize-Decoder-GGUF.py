@@ -7,7 +7,7 @@ from export_config import EXPORT_DIR
 # 设置路径
 PROJECT_ROOT = Path(__file__).parent.absolute()
 QUANTIZE_NAME = "llama-quantize.exe" if platform.system() == "Windows" else "llama-quantize"
-QUANTIZE_EXE = PROJECT_ROOT / "fun_asr_gguf" / "bin" / QUANTIZE_NAME
+QUANTIZE_EXE = PROJECT_ROOT / "fun_asr_gguf" / "inference"/"bin" / QUANTIZE_NAME
 
 QUANTIZE_TYPE = "q5_k"
 MODEL_DIR = Path(EXPORT_DIR)

@@ -88,7 +88,7 @@ def main():
         dummy_mask = torch.ones(1, 17)
         
         # Define dynamic symbols for Encoder
-        lfr_frames = torch.export.Dim("lfr_frames", min=2, max=16384)
+        lfr_frames = torch.export.Dim("lfr_frames", min=1, max=16384)
         
         torch.onnx.export(
             enc_wrapper, (dummy_lfr, dummy_mask), ONNX_ENCODER_FP32,
@@ -108,7 +108,7 @@ def main():
         dummy_enc = torch.randn(1, 100, 512)
         
         # Define dynamic symbols for CTC
-        enc_len = torch.export.Dim("enc_len", min=2, max=16384)
+        enc_len = torch.export.Dim("enc_len", min=1, max=16384)
         
         torch.onnx.export(
             ctc_wrapper, (dummy_enc,), ONNX_CTC_FP32,

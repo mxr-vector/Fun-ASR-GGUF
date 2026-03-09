@@ -3,7 +3,7 @@ ASR 演示脚本 - 简单直接的使用示例
 """
 
 import os
-from fun_asr_gguf import create_asr_engine
+from fun_asr_gguf import FunASREngine, ASREngineConfig
 
 
 # ==================== Vulkan 选项 ====================
@@ -33,13 +33,11 @@ verbose = True
 # 是否以 JSON 格式输出结果
 json_output = False
 
-# 是否生成 SRT 字幕文件
-srt = False
 # 模型文件路径
 model_dir = "./model"
 encoder_onnx_path = f"{model_dir}/Fun-ASR-Nano-Encoder-Adaptor.fp16.onnx"
 ctc_onnx_path = f"{model_dir}/Fun-ASR-Nano-CTC.fp16.onnx"
-decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.fp16.gguf"
+decoder_gguf_path = f"{model_dir}/Fun-ASR-Nano-Decoder.q5_k.gguf"
 tokens_path = f"{model_dir}/tokens.txt"
 hotwords_path = "./hot.txt"  # 可选，留空则不使用热词
 
@@ -64,8 +62,7 @@ def main():
     print("ASR 语音识别")
     print("="*70)
 
-    # 创建 ASR 引擎
-    engine = create_asr_engine(
+    config = ASREngineConfig(
         encoder_onnx_path=encoder_onnx_path,
         ctc_onnx_path=ctc_onnx_path,
         decoder_gguf_path=decoder_gguf_path,
@@ -74,8 +71,10 @@ def main():
         similar_threshold=0.6, 
         max_hotwords=10, 
         enable_ctc=enable_ctc,
+        onnx_provider='cuda', 
         verbose=verbose,
     )
+    engine = FunASREngine(config)
 
     print(f'\n预跑一遍，分配内存......\n')
     result = engine.transcribe(
@@ -95,7 +94,7 @@ def main():
         overlap=4.0,
         start_second=0.0,
         duration=60.0,
-        srt=srt, 
+        srt=True, 
         temperature=0.4
     )
 

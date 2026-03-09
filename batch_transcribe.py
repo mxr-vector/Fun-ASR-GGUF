@@ -23,17 +23,7 @@ hotwords_path = "./hot-word.txt"
 
 language = None  # None=自动检测
 
-context = (
-    "这是民航空中交通管制（ATC）地空通话录音，通话语言为中英文混合。"
-    "说话人为管制员或飞行员，内容涉及起飞、落地、滑行、航向、高度、速度等指令。"
-    "中文数字采用航空专用读法：0=洞，1=幺，2=两，3=三，4=四，5=五，6=六，7=拐，8=八，9=勾。"
-    "英文部分使用ICAO标准术语，如CLEARED、MAINTAIN、DESCEND、CLIMB、RUNWAY、SQUAWK，"
-    "以及NATO音标字母如ALFA、BRAVO、CHARLIE等。"
-    "请严格保留原始口语读法，中文数字不要转为阿拉伯数字，英文术语保留原词。"
-    "常见句式如：南方三五六幺请联系进近幺两幺点六五、CCA1508 DESCEND AND MAINTAIN FL090、修正海压幺洞幺三。"
-    "通话中可能包含航班呼号（如国航、东方、南方、Cathay、Lufthansa）加数字编号、"
-    "跑道编号、频率读报、应答机编码、高度层和航向角度。"
-)
+context = ()
 
 enable_ctc = True
 output_json = "transcribe_results.json"
@@ -119,7 +109,7 @@ def main():
             results[filename] = text
 
             print(f"  耗时: {cost:.1f}s")
-            print(f"  结果: {text[:200]}{'...' if len(text) > 200 else ''}\n")
+            print(f"  结果: {text}\n")
 
         except Exception as e:
             cost = time.time() - start_time

@@ -1,7 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from core.config import settings
-from fun_asr_gguf import create_asr_engine
+from fun_asr_gguf import FunASREngine, ASREngineConfig
 from core.logger import logger
 
 
@@ -30,7 +30,7 @@ class ASRService:
             return
 
         logger.info("正在初始化 ASR 引擎...")
-        self.engine = create_asr_engine(
+        config = ASREngineConfig(
             encoder_onnx_path=settings.encoder_onnx_path,
             ctc_onnx_path=settings.ctc_onnx_path,
             decoder_gguf_path=settings.decoder_gguf_path,
@@ -41,6 +41,7 @@ class ASRService:
             enable_ctc=settings.ENABLE_CTC,
             verbose=False,
         )
+        self.engine = FunASREngine(config)
         logger.info("ASR 引擎初始化成功。")
 
     def cleanup(self):

@@ -3,6 +3,7 @@ __pycache__/
 build/
 dist/
 datasets/
+data/
 data-en/
 data-zh/
 log/

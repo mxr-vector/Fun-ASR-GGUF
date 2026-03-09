@@ -1,13 +1,13 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from core.config import settings
-from fun_asr_gguf import create_asr_engine
+from fun_asr_gguf import FunASREngine, ASREngineConfig
 from core.logger import logger
 
 class ASRService:
     def __init__(self):
         self.engine = None
-        
+
         # --- 生产级并发与线程安全处理规则 ---
         # `fun_asr_gguf` 中的 llama.cpp / ONNX 模型和 PyTorch 实例
         # 占用大量内存，并且在执行推理时保持内部状态。
@@ -27,9 +27,9 @@ class ASRService:
     def initialize(self):
         if self.engine is not None:
             return
-            
+
         logger.info("正在初始化 ASR 引擎...")
-        self.engine = create_asr_engine(
+        config = ASREngineConfig(
             encoder_onnx_path=settings.encoder_onnx_path,
             ctc_onnx_path=settings.ctc_onnx_path,
             decoder_gguf_path=settings.decoder_gguf_path,
@@ -40,6 +40,7 @@ class ASRService:
             enable_ctc=settings.ENABLE_CTC,
             verbose=False,
         )
+        self.engine = FunASREngine(config)
         logger.info("ASR 引擎初始化成功。")
 
     def cleanup(self):
@@ -51,8 +52,8 @@ class ASRService:
 
     def _transcribe_sync(self, filepath: str, language: str = None, context: str = None) -> dict:
         if not self.engine:
-             raise RuntimeError("ASR 引擎尚未初始化")
-            
+            raise RuntimeError("ASR 引擎尚未初始化")
+
         result = self.engine.transcribe(
             filepath,
             language=language,
@@ -88,7 +89,7 @@ class ASRService:
             return []
         if getattr(self.engine.models, "hotword_manager", None) is None:
             return []
-        
+
         # 从字典键中获取当前的所有热词, 位于 phoneme_corrector 中
         try:
             hw_dict = self.engine.models.hotword_manager.phoneme_corrector.hotwords
@@ -100,14 +101,14 @@ class ASRService:
         """更新热词文件并触发内存重载"""
         # 将列表写入文件
         content = "\n".join(words)
-        
+
         path = settings.HOTWORDS_PATH
         if not path:
             raise ValueError("热词文件路径未配置")
-            
+
         with open(path, "w", encoding="utf-8") as f:
             f.write(content + "\n")
-            
+
         # 触发立即重载
         if self.engine and getattr(self.engine, "models", None) and getattr(self.engine.models, "hotword_manager", None):
             self.engine.models.hotword_manager._load_hot()
@@ -115,7 +116,7 @@ class ASRService:
                 return len(self.engine.models.hotword_manager.phoneme_corrector.hotwords)
             except AttributeError:
                 pass
-                
+
         return len(words)
 
 asr_service = ASRService()

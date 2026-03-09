@@ -78,12 +78,12 @@ class LLMDecoder:
                     continue
                 
                 # 尾部无限循环，熔断
-                if len(set(asr_decoder.tokens[-30:])) <= 3:
+                if len(set(asr_decoder.tokens[-30:])) <= 2:
                     res.is_aborted = True
                     break
 
-                # 达到30个token时还没生成标点，熔断
-                if len(asr_decoder.tokens) == 30: 
+                # 达到200个token时还没生成标点，熔断（针对特殊场景等无标点场景放宽）
+                if len(asr_decoder.tokens) == 200: 
                     if not re.search(r'[，。？！、；：,\.?!;:]', asr_decoder.generated_text):
                         res.is_aborted = True
                         break
@@ -145,8 +145,13 @@ class StreamDecoder:
             reporter.print(f"    CTC: {ctc_text}")
             if hotwords: reporter.print(f"    热词: {hotwords}")
         
+        if ctc_times:
+            for k, v in ctc_times.items():
+                if hasattr(timings, k):
+                    setattr(timings, k, v)
+
         # 详细耗时详情
-        t_detail = " | ".join([f"{k}:{v*1000:.1f}ms" for k, v in ctc_times.items() if v > 0])
+        t_detail = " | ".join([f"{k}:{v*1000:.1f}ms" for k, v in (ctc_times or {}).items() if v > 0])
         reporter.print(f"    耗时: {timings.ctc*1000:.2f}ms ({t_detail})")
 
         # 3. Prompt

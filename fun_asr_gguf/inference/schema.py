@@ -94,6 +94,15 @@ class Timings:
     align: float = 0.0
     integrate: float = 0.0
     total: float = 0.0
+    
+    # Optional detailed timings
+    ctc_infer: float = 0.0
+    ctc_decode: float = 0.0
+    ctc_cast: float = 0.0
+    ctc_argmax: float = 0.0
+    ctc_loop: float = 0.0
+    hotword_verify: float = 0.0
+    load_audio: float = 0.0
 
 
 @dataclass

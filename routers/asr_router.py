@@ -10,10 +10,8 @@ from core.config import settings
 from core.logger import logger
 from core.response import R
 
-router = APIRouter(
-    prefix="/asr",
-    tags=["ASR Transcription"]
-)
+router = APIRouter(prefix="/asr", tags=["ASR Transcription"])
+
 
 class TranscriptionResponse(BaseModel):
     filename: str
@@ -28,8 +26,10 @@ class TranscriptionResponse(BaseModel):
     duration: Optional[float] = None
     vad_segments: Optional[list] = None
 
+
 class HotwordsRequest(BaseModel):
     words: List[str]
+
 
 @router.get("/hotwords", summary="获取当前热词列表")
 async def get_hotwords():
@@ -38,6 +38,7 @@ async def get_hotwords():
     """
     words = asr_service.get_hotwords()
     return R.success(data={"words": words, "count": len(words)})
+
 
 @router.post("/hotwords", summary="更新热词列表（支持热更新）")
 async def update_hotwords(request: HotwordsRequest):
@@ -51,12 +52,18 @@ async def update_hotwords(request: HotwordsRequest):
         logger.error(f"热词更新失败: {e}", exc_info=True)
         return R.fail(msg=f"热词更新失败: {str(e)}", code=500)
 
-@router.post("/transcribe", response_model=R[TranscriptionResponse], summary="单个音频文件转写")
+
+@router.post(
+    "/transcribe", response_model=R[TranscriptionResponse], summary="单个音频文件转写"
+)
 async def transcribe_audio(
     file: UploadFile = File(...),
     audio_id: Optional[str] = Form(None, description="音频的自定义ID，原样返回"),
     language: Optional[str] = Form(None, description="语言设置（None=自动检测）"),
     context: Optional[str] = Form(settings.DEFAULT_CONTEXT, description="上下文信息"),
+    temperature: float = Form(
+        0.0, description="温度参数，用于控制解码的随机性（0.0-1.0）"
+    ),
 ):
     """
     接收单个音频文件并使用 Fun-ASR 进行转写。
@@ -65,25 +72,26 @@ async def transcribe_audio(
     if not file.filename:
         logger.warning("请求拒绝：未提供上传文件名称。")
         return R.fail(msg="未上传文件", code=400)
-        
+
     ext = os.path.splitext(file.filename)[1].lower()
-    
+
     # 创建临时文件统一保存上传的音频
     fd, temp_path = tempfile.mkstemp(suffix=ext)
     os.close(fd)
-    
+
     logger.info(f"正在接收音频文件: {file.filename}")
-    
+
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
+
         result_dict = await asr_service.transcribe_async(
-            temp_path, 
-            language=language, 
-            context=context
+            temp_path,
+            language=language,
+            context=context,
+            temperature=temperature,
         )
-        
+
         response_data = TranscriptionResponse(
             audio_id=audio_id,
             filename=file.filename,
@@ -96,9 +104,9 @@ async def transcribe_audio(
             duration=result_dict.get("duration", None),
             vad_segments=result_dict.get("vad_segments", []),
         )
-        
+
         return R.success(data=response_data)
-        
+
     except Exception as e:
         logger.error(f"转写文件 {file.filename} 时出错: {e}", exc_info=True)
         return R.fail(msg=f"转写失败: {str(e)}", code=500)
@@ -108,12 +116,21 @@ async def transcribe_audio(
             os.remove(temp_path)
 
 
-@router.post("/transcribe/batch", response_model=R[List[TranscriptionResponse]], summary="批量音频文件转写")
+@router.post(
+    "/transcribe/batch",
+    response_model=R[List[TranscriptionResponse]],
+    summary="批量音频文件转写",
+)
 async def transcribe_audio_batch(
     files: List[UploadFile] = File(...),
-    audio_ids: Optional[List[str]] = Form(None, description="音频的ID列表，需与files顺序对应"),
+    audio_ids: Optional[List[str]] = Form(
+        None, description="音频的ID列表，需与files顺序对应"
+    ),
     language: Optional[str] = Form(None, description="语言设置（None=自动检测）"),
     context: Optional[str] = Form(settings.DEFAULT_CONTEXT, description="上下文信息"),
+    temperature: float = Form(
+        0.0, description="温度参数，用于控制解码的随机性（0.0-1.0）"
+    ),
 ):
     """
     接收多个音频文件并进行批量转写。由于底层使用单例和锁，
@@ -123,32 +140,37 @@ async def transcribe_audio_batch(
         return R.fail(msg="未上传文件", code=400)
 
     logger.info(f"正在接收批量音频上传: 共 {len(files)} 个文件")
-    
+
     results = []
-    
+
     # 内部异步函数：用于处理单个文件
-    async def process_single_file(file: UploadFile, audio_id: Optional[str]) -> TranscriptionResponse:
+    async def process_single_file(
+        file: UploadFile, audio_id: Optional[str]
+    ) -> TranscriptionResponse:
         if not file.filename:
-            return TranscriptionResponse(audio_id=audio_id, filename="unknown", text="", error="No filename provided")
-            
+            return TranscriptionResponse(
+                audio_id=audio_id,
+                filename="unknown",
+                text="",
+                error="No filename provided",
+            )
+
         ext = os.path.splitext(file.filename)[1].lower()
         fd, temp_path = tempfile.mkstemp(suffix=ext)
         os.close(fd)
-        
+
         try:
             with open(temp_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            
+
             # asr_service 内部的 asyncio.Lock() 会安全地处理重叠的并发请求
             result_dict = await asr_service.transcribe_async(
-                temp_path, 
-                language=language, 
-                context=context
+                temp_path, language=language, context=context, temperature=temperature
             )
             return TranscriptionResponse(
                 audio_id=audio_id,
-                filename=file.filename, 
-                text=result_dict.get("text", ""), 
+                filename=file.filename,
+                text=result_dict.get("text", ""),
                 language=language,
                 ctc_segments=result_dict.get("segments", []),
                 ctc_text=result_dict.get("ctc_text", ""),
@@ -157,14 +179,16 @@ async def transcribe_audio_batch(
                 duration=result_dict.get("duration", None),
                 vad_segments=result_dict.get("vad_segments", []),
             )
-            
+
         except Exception as e:
             logger.error(f"批量转写文件 {file.filename} 时出错: {e}", exc_info=True)
-            return TranscriptionResponse(audio_id=audio_id, filename=file.filename, text="", error=str(e))
+            return TranscriptionResponse(
+                audio_id=audio_id, filename=file.filename, text="", error=str(e)
+            )
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-    
+
     # 使用 gather 并发调度所有转写任务，服务层的锁机制会自动对它们进行安全排队
     coroutines = []
     for idx, f in enumerate(files):
@@ -172,8 +196,9 @@ async def transcribe_audio_batch(
         coroutines.append(process_single_file(f, aid))
 
     results = await asyncio.gather(*coroutines)
-    
+
     return R.success(data=results)
+
 
 @router.get("/health", summary="生产级健康检查")
 async def health_check():
@@ -185,7 +210,7 @@ async def health_check():
     data = {
         "status": "healthy" if is_loaded else "degraded",
         "engine_loaded": is_loaded,
-        "workers": asr_service._executor._max_workers
+        "workers": asr_service._executor._max_workers,
     }
     if is_loaded:
         return R.success(data=data, msg="系统运行正常")

@@ -53,7 +53,11 @@ class ASRService:
         self._executor.shutdown(wait=True)
 
     def _transcribe_sync(
-        self, filepath: str, language: str = None, context: str = None
+        self,
+        filepath: str,
+        language: str = None,
+        context: str = None,
+        temperature: float = 0.0,
     ) -> dict:
         if not self.engine:
             raise RuntimeError("ASR 引擎尚未初始化")
@@ -67,7 +71,7 @@ class ASRService:
             overlap=4.0,
             start_second=0.0,
             duration=None,
-            temperature=0.4,
+            temperature=temperature,
         )
 
         # 关键修复：清理decoder状态，防止单例引擎内部状态污染
@@ -100,12 +104,21 @@ class ASRService:
         return {"text": str(result)}
 
     async def transcribe_async(
-        self, filepath: str, language: str = None, context: str = None
+        self,
+        filepath: str,
+        language: str = None,
+        context: str = None,
+        temperature: float = 0.0,
     ) -> dict:
         async with self._lock:
             loop = asyncio.get_running_loop()
             result_dict = await loop.run_in_executor(
-                self._executor, self._transcribe_sync, filepath, language, context
+                self._executor,
+                self._transcribe_sync,
+                filepath,
+                language,
+                context,
+                temperature,
             )
             return result_dict
 

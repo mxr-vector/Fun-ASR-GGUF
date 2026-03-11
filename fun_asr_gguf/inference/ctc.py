@@ -20,7 +20,6 @@ class CTCTokenizer:
     """
     def __init__(self, id2token, encode_fn=None):
         self.id2token = id2token
-        # 预构建反向查表字典，加速 encode()
         self.token2id = {v: k for k, v in id2token.items()}
         self._piece_size = len(id2token) if id2token else 0
         
@@ -28,14 +27,9 @@ class CTCTokenizer:
         return self._piece_size
         
     def id_to_piece(self, i):
-        # 兼容 SentencePiece 接口
         return self.id2token.get(i, f"<{i}>")
         
     def encode(self, text):
-        """
-        将文本编码为 CTC token ID 列表。
-        按字符遍历，在 CTC 词表中查找对应 ID（精确匹配）。
-        """
         result = []
         for char in text:
             tid = self.token2id.get(char)
@@ -46,6 +40,7 @@ class CTCTokenizer:
     def encode_as_pieces(self, text):
         ids = self.encode(text)
         return [self.id_to_piece(i) for i in ids]
+
 
 class CTCDecoder:
     """FunASR CTC 推理与解码器 (多阶段内部流水线)"""
@@ -59,9 +54,9 @@ class CTCDecoder:
         self.sess = None
         self.id2token = {}
         self.input_dtype = np.float32
-        self.tokenizer = None   # CTCTokenizer 包装器
-        self.radar = None       # HotwordRadar（由 ModelManager 注入）
-        self.integrator = None  # ResultIntegrator（由 ModelManager 注入）
+        self.tokenizer = None
+        self.radar = None
+        self.integrator = None
         
         self._initialize_session()
         self._load_tokens()
@@ -72,7 +67,6 @@ class CTCDecoder:
         session_opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
         session_opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
         session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # session_opts.enable_profiling = True
         
         available_providers = onnxruntime.get_available_providers()
         providers = ['CPUExecutionProvider']
@@ -96,7 +90,6 @@ class CTCDecoder:
             providers=providers
         )
         
-        # 检测模型输入精度
         in_type = self.sess.get_inputs()[0].type
         self.input_dtype = np.float16 if 'float16' in in_type else np.float32
 
@@ -104,7 +97,6 @@ class CTCDecoder:
         self.id2token = load_ctc_tokens(self.tokens_path)
         self.tokenizer = CTCTokenizer(self.id2token)
         
-        # 精准寻找 Blank ID：优先匹配包含关键标识的符号
         self.blank_id = None
         for tid, token_text in self.id2token.items():
             clean_text = token_text.lower().strip()
@@ -113,7 +105,6 @@ class CTCDecoder:
                 break
         if self.blank_id is None:
             self.blank_id = max(self.id2token.keys()) if self.id2token else 0
-            
 
     def warmup(self):
         if self.dml_pad_to <= 0:
@@ -124,106 +115,66 @@ class CTCDecoder:
         logger.info(f"[CTC] 正在预热 (固定形状: {self.dml_pad_to}s)...")
         self.sess.run(None, {in_name: dummy_enc})
 
-    # ================================================================
-    # 对外唯一入口：decode()
-    # 返回三元组 (ctc_results, hotwords, t_stats)
-    # ================================================================
-
     def decode(self, enc_output: np.ndarray, enable_ctc: bool, max_hotwords: int = 10, top_k: int = 10) -> Tuple[List[Token], List[str], Dict[str, float]]:
-        """
-        完整解码流水线（黑箱）。
-        内部按顺序执行：ONNX推理 → 贪婪解码 → 雷达扫描 → 整合 → 拼音纠错
-        
-        Returns:
-            ctc_results: 贪婪解码或整合后的 Token 列表
-            hotwords:    综合检测到的热词文本列表
-            t_stats:     各阶段耗时字典
-        """
         t_stats = {"infer": 0.0, "decode": 0.0, "radar": 0.0, "integrate": 0.0, "hotword": 0.0}
         if not enable_ctc or self.sess is None:
             return [], [], t_stats
 
-        # ---- 阶段 1: ONNX 推理 (获取 Top-K) ----
         t0 = time.perf_counter()
         topk_log_probs, topk_indices = self._infer(enc_output)
         t_stats["infer"] = time.perf_counter() - t0
         
-        # ---- 阶段 2: 贪婪解码 (Top-1) ----
         t0 = time.perf_counter()
-        indices_2d = topk_indices[0]        # [T, K]
-        top1_indices = indices_2d[:, 0]     # [T]
+        indices_2d = topk_indices[0]
+        top1_indices = indices_2d[:, 0]
         ctc_text, ctc_results = self._greedy_decode(top1_indices)
         t_stats["decode"] = time.perf_counter() - t0
         
-        # ---- 阶段 3: 雷达扫描 (Top-K 空间) ----
         t0 = time.perf_counter()
         topk_probs = np.exp(topk_log_probs[0])
         detected_hotwords = self._radar_scan(indices_2d, topk_probs, top1_indices, top_k=top_k)
         t_stats["radar"] = time.perf_counter() - t0
         
-        # ---- 阶段 4: 整合 (Greedy + 热词 → 替换) ----
         t0 = time.perf_counter()
         if detected_hotwords and ctc_results:
             ctc_text, ctc_results = self._integrate(ctc_results, detected_hotwords)
         t_stats["integrate"] = time.perf_counter() - t0
         
-        # ---- 阶段 5: 拼音纠错 (补充热词) ----
         t0 = time.perf_counter()
         hotwords = [h["text"] for h in detected_hotwords]
         if self.corrector and self.corrector.hotwords and ctc_text:
             corrected_text, extra_hotwords = self._correct(ctc_text, max_hotwords)
             hotwords = list(set(hotwords) | set(extra_hotwords))
-            t_stats["hotword"] = time.perf_counter() - t0
-        else:
-            t_stats["hotword"] = time.perf_counter() - t0
+        t_stats["hotword"] = time.perf_counter() - t0
             
         return ctc_results, hotwords, t_stats
 
-    # ================================================================
-    # 内部阶段方法
-    # ================================================================
-
     def _infer(self, enc_output: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """阶段 1: ONNX 推理，返回 (topk_log_probs, topk_indices)"""
         outputs = self.sess.run(None, {"enc_output": enc_output})
         return outputs[0], outputs[1]
 
     def _greedy_decode(self, top1_indices: np.ndarray) -> Tuple[str, List[Token]]:
-        """阶段 2: 基于 Top-1 Index 的贪婪解码"""
-        ctc_text, ctc_results, _ = decode_ctc_indices(top1_indices, self.id2token)
+        # 传入实例级 blank_id，避免每次调用重新计算
+        ctc_text, ctc_results, _ = decode_ctc_indices(top1_indices, self.id2token, blank_id=self.blank_id)
         return ctc_text, ctc_results
 
     def _radar_scan(self, indices_2d: np.ndarray, topk_probs: np.ndarray, top1_indices: np.ndarray, top_k: int = 10) -> List[Dict]:
-        """阶段 3: 热词雷达扫描"""
         if self.radar is None:
             return []
-        
-        # 缩减搜索空间并确定网格打印深度
         sliced_ids = indices_2d[:, :top_k]
         sliced_probs = topk_probs[:, :top_k]
-        
-        # 仅在非预热/正常解码时通过 display_top_k 触发打印 (如果需要常驻显示可直接设为 top_k)
-        # 显式传递 blank_id，防止雷达误判实音间隙
         return self.radar.scan(sliced_ids, sliced_probs, top1_indices, blank_id=self.blank_id)
 
     def _integrate(self, ctc_results: List[Token], detected_hotwords: List[Dict]) -> Tuple[str, List[Token]]:
-        """阶段 4: 将雷达命中的热词整合进贪婪结果"""
         if self.integrator is None:
-            return "".join([r.text for r in ctc_results]), ctc_results
-        
-        greedy_fmt = [{"text": r.text, "start": r.start} for r in ctc_results]
-        integrated_list = self.integrator.integrate(greedy_fmt, detected_hotwords)
-        
-        # 将整合结果转回 Token 列表
-        new_results = [
-            Token(text=r["text"], start=r["start"], is_hotword=r.get("is_hotword", False))
-            for r in integrated_list
-        ]
-        new_text = "".join([r.text for r in new_results])
-        return new_text, new_results
+            return "".join(r.text for r in ctc_results), ctc_results
+        integrated_list = self.integrator.integrate(
+            [{"text": r.text, "start": r.start} for r in ctc_results], detected_hotwords
+        )
+        new_results = [Token(text=r["text"], start=r["start"], is_hotword=r.get("is_hotword", False)) for r in integrated_list]
+        return "".join(r.text for r in new_results), new_results
 
     def _correct(self, text: str, max_hotwords: int) -> Tuple[str, List[str]]:
-        """阶段 5: 拼音纠错，返回 (纠错后文本, 额外发现的热词列表)"""
         res = self.corrector.correct(text, k=max_hotwords)
         candidates = set()
         for _, hw, _ in res.matchs: candidates.add(hw)
@@ -231,14 +182,8 @@ class CTCDecoder:
         return res.text, list(candidates)
 
     def set_hotword_engine(self, corrector):
-        """
-        [职责下放] 绑定纠错器，并自动初始化内部配套的雷达与整合器。
-        符合高内聚原则：CTCDecoder 自己负责管理其热词功能闭环。
-        """
         self.corrector = corrector
         
-        # 内部自治：利用已有的 tokenizer 自动创建配套组件
-        # 延迟导入以避免循环依赖
         from .radar import HotwordRadar
         from .integrator import ResultIntegrator
         
@@ -249,218 +194,186 @@ class CTCDecoder:
         logger.info(f"[CTC] 已绑定热词引擎 (热词数: {len(all_hotwords)})")
 
 
-def load_ctc_tokens(filename):
+# ================================================================
+# 模块级工具函数
+# ================================================================
+
+def load_ctc_tokens(filename: str) -> Dict[int, str]:
     """加载 CTC 词表"""
-    id2token = dict()
+    id2token: Dict[int, str] = {}
     if not os.path.exists(filename):
         return id2token
     with open(filename, encoding="utf-8") as f:
         for line in f:
             parts = line.strip().split()
-            if not parts: continue
+            if not parts:
+                continue
             if len(parts) == 1:
                 t, i = " ", parts[0]
             else:
                 t, i = parts
-            
-            # Pre-decode base64 here to save time during inference
             try:
-                # Some tokens might rely on being decoded, do it once
                 token_text = base64.b64decode(t).decode("utf-8")
-            except:
+            except Exception:
                 token_text = t
-                
             id2token[int(i)] = token_text
-                
     return id2token
 
-def decode_ctc_indices(indices, id2token):
+
+def decode_ctc_indices(indices, id2token: Dict[int, str], blank_id: Optional[int] = None) -> Tuple[str, List[Token], Dict]:
     """
-    Greedy search 贪心解码 (直接基于 Indices)。
+    Greedy search 贪心解码。
+
+    blank_id 由外部传入（复用 CTCDecoder 实例上已计算好的值），
+    避免每次调用都执行 max(id2token.keys())。
     """
     t0 = time.perf_counter()
-    blank_id = max(id2token.keys()) if id2token else 0
-    
+
+    if blank_id is None:
+        blank_id = max(id2token.keys()) if id2token else 0
+
     frame_shift_ms = 60
-    
-    # 1. Collapse repeats
-    collapsed = []
+
+    # 1. 折叠连续重复帧，记录每段起始帧索引
+    collapsed: List[Tuple[int, int]] = []
     if len(indices) > 0:
-        current_id = indices[0]
+        current_id = int(indices[0])
         start_idx = 0
         for i in range(1, len(indices)):
-            if indices[i] != current_id:
+            nid = int(indices[i])
+            if nid != current_id:
                 collapsed.append((current_id, start_idx))
-                current_id = indices[i]
+                current_id = nid
                 start_idx = i
         collapsed.append((current_id, start_idx))
 
-    results = []
-
-    # 2. Filter blanks and decode text
+    # 2. 过滤 blank，构造 Token 列表
+    results: List[Token] = []
     for token_id, start in collapsed:
         if token_id == blank_id:
             continue
-
         token_text = id2token.get(token_id, "")
-        if not token_text: continue
-
-        # Calculate time (只计算起始位置)
+        if not token_text:
+            continue
         t_start = max((start * frame_shift_ms) / 1000.0, 0.0)
+        results.append(Token(text=token_text, start=t_start))
 
-        results.append(Token(
-            text=token_text,
-            start=t_start
-        ))
-                
-    full_text = "".join([r.text for r in results])
-    t_loop = time.perf_counter() - t0
-    
-    timings = {
-        "cast": 0.0,
-        "argmax": 0.0,
-        "loop": t_loop
-    }
-    return full_text, results, timings
+    full_text = "".join(r.text for r in results)
+    return full_text, results, {"loop": time.perf_counter() - t0}
 
-def align_timestamps(ctc_results, llm_text):
+
+def align_timestamps(ctc_results: List[Token], llm_text: str) -> List[Dict]:
     """
-    使用 Needleman-Wunsch 算法对齐 CTC 结果和 LLM 文本
-    只使用起始位置进行匹配
+    使用 Needleman-Wunsch 算法对齐 CTC 结果与 LLM 文本，输出字符级时间戳。
+
+    【核心修复】
+    CTC 贪婪解码时，若头部若干帧的帧号同为 0（模型在第 0 帧连续输出多个 token），
+    ctc_chars 前几项 start 会全部堆叠为 0.0。
+    若直接将这些 0.0 作为 NW 锚点，LLM 对齐字符也会继承 0.0，
+    后续任何插值都无法修正。
+
+    正确做法：NW 对齐之前，先对 ctc_chars 做单调性修复——
+    找到第一个 start > 0 的位置，将 [0, first_nz) 区间内字符
+    均匀分配到 [0, base_time)，确保锚点时间本身单调递增。
     """
     if not ctc_results or not llm_text:
         return []
 
-    # 1. 展开 CTC 结果为字符级别（只保留起始位置）
-    ctc_chars = []
+    # frame_shift_ms=60 → 每帧 60ms，单字符默认时长与此对齐
+    CHAR_DURATION = 0.06
+
+    # ---- 1. 展开 CTC Token 为字符级序列 ----
+    ctc_chars: List[Dict] = []
     for item in ctc_results:
-        text = item.text
-        start = item.start
+        for i, char in enumerate(item.text):
+            ctc_chars.append({"token": char, "start": item.start + i * CHAR_DURATION})
 
-        if len(text) > 0:
-            # 假设每个字符占用相同时间间隔
-            char_duration = 0.08  # 默认每个字符约 80ms
-            for i, char in enumerate(text):
-                c_start = start + i * char_duration
-                ctc_chars.append({"token": char, "start": c_start})
+    # ---- 2. 修复 ctc_chars 头部 start=0.0 堆叠 ----
+    first_nz = next((i for i, c in enumerate(ctc_chars) if c["start"] > 0.0), -1)
+    if first_nz > 0:
+        # 将 [0, first_nz) 均匀分配到 [0, base_time)
+        base_time = ctc_chars[first_nz]["start"]
+        step = base_time / first_nz
+        for k in range(first_nz):
+            ctc_chars[k]["start"] = k * step
+    elif first_nz == -1 and ctc_chars:
+        # 极端情况：所有帧均为 0，用固定步长撑开
+        for k in range(len(ctc_chars)):
+            ctc_chars[k]["start"] = k * CHAR_DURATION
 
+    # ---- 3. Needleman-Wunsch DP ----
     llm_chars = list(llm_text)
+    n, m = len(ctc_chars) + 1, len(llm_chars) + 1
+    GAP, MATCH, MISMATCH = -1.0, 1.0, -1.0
 
-    n = len(ctc_chars) + 1
-    m = len(llm_chars) + 1
-
-    # Core DP Matrix
     score = np.zeros((n, m), dtype=np.float32)
-    # trace: 1=diag, 2=up, 3=left
-    trace = np.zeros((n, m), dtype=np.int8)
+    trace = np.zeros((n, m), dtype=np.int8)  # 1=diag 2=up 3=left
+    score[:, 0] = np.arange(n) * GAP
+    score[0, :] = np.arange(m) * GAP
 
-    gap_penalty = -1.0
-    match_score = 1.0
-    mismatch_score = -1.0
-
-    # Init margins
-    for i in range(n): score[i][0] = i * gap_penalty
-    for j in range(m): score[0][j] = j * gap_penalty
-
-    # Fill DP
     for i in range(1, n):
+        ctc_tok = ctc_chars[i - 1]["token"].lower()
         for j in range(1, m):
-            char_ctc = ctc_chars[i-1]["token"]
-            char_llm = llm_chars[j-1]
-
-            s_diag = score[i-1][j-1] + (match_score if char_ctc.lower() == char_llm.lower() else mismatch_score)
-            s_up = score[i-1][j] + gap_penalty
-            s_left = score[i][j-1] + gap_penalty
-
+            s_diag = score[i-1][j-1] + (MATCH if ctc_tok == llm_chars[j-1].lower() else MISMATCH)
+            s_up   = score[i-1][j] + GAP
+            s_left = score[i][j-1] + GAP
             best = max(s_diag, s_up, s_left)
             score[i][j] = best
+            if best == s_diag:  trace[i][j] = 1
+            elif best == s_up:  trace[i][j] = 2
+            else:               trace[i][j] = 3
 
-            if best == s_diag: trace[i][j] = 1
-            elif best == s_up: trace[i][j] = 2
-            else: trace[i][j] = 3
-
-    # Traceback
-    llm_alignment = [None] * len(llm_chars)
+    # ---- 4. 回溯，建立 LLM 字符 → CTC 字符的对齐映射 ----
+    llm_alignment: List[Optional[Dict]] = [None] * len(llm_chars)
     i, j = n - 1, m - 1
-
     while i > 0 or j > 0:
         if i > 0 and j > 0 and trace[i][j] == 1:
-            llm_alignment[j-1] = ctc_chars[i-1]
-            i -= 1
-            j -= 1
+            llm_alignment[j - 1] = ctc_chars[i - 1]
+            i -= 1; j -= 1
         elif i > 0 and (j == 0 or trace[i][j] == 2):
             i -= 1
-        elif j > 0 and (i == 0 or trace[i][j] == 3):
-            llm_alignment[j-1] = None
+        else:
+            llm_alignment[j - 1] = None
             j -= 1
 
-    # 插值填充未对齐的字符
-    anchors = []
-    for idx, item in enumerate(llm_alignment):
-        if item is not None:
-            anchors.append((idx, item["start"]))
+    # ---- 5. 收集有效锚点（时间已单调，可直接用于插值） ----
+    known: List[Tuple[int, float]] = [
+        (idx, item["start"])
+        for idx, item in enumerate(llm_alignment)
+        if item is not None
+    ]
 
-    final_chars = []
+    # ---- 6. 按锚点区间线性填充所有字符的 start ----
+    starts = [0.0] * len(llm_chars)
+    if known:
+        first_idx, first_time = known[0]
+        last_idx,  last_time  = known[-1]
 
-    def get_interpolated_start(target_idx):
-        """插值计算起始位置"""
-        prev_a, next_a = None, None
-        for a in anchors:
-            if a[0] < target_idx:
-                prev_a = a
-            elif a[0] > target_idx:
-                next_a = a
-                break
+        # 头部 [0, first_idx)：均匀分配到 [0, first_time)
+        step = first_time / first_idx if first_idx > 0 and first_time > 0 else CHAR_DURATION
+        for k in range(first_idx):
+            starts[k] = k * step
 
-        if prev_a and next_a:
-            p_idx, p_start = prev_a
-            n_idx, n_start = next_a
+        # 锚点自身 + 相邻锚点之间线性插值
+        for ki, (l_idx, l_time) in enumerate(known):
+            starts[l_idx] = l_time
+            if ki + 1 < len(known):
+                r_idx, r_time = known[ki + 1]
+                span = r_idx - l_idx
+                for k in range(l_idx + 1, r_idx):
+                    starts[k] = l_time + (k - l_idx) / span * (r_time - l_time)
 
-            # 线性插值
-            total_gap = n_idx - p_idx
-            time_gap = n_start - p_start
-            step = time_gap / total_gap
+        # 尾部 (last_idx, end]：向后等间距
+        for k in range(last_idx + 1, len(llm_chars)):
+            starts[k] = last_time + (k - last_idx) * CHAR_DURATION
+    else:
+        # 完全无锚点，固定步长兜底
+        for k in range(len(llm_chars)):
+            starts[k] = k * CHAR_DURATION
 
-            relative_step = target_idx - p_idx
-            return p_start + relative_step * step
-        elif prev_a:
-            return prev_a[1] + 0.05  # 向后推一点
-        elif next_a:
-            return max(0, next_a[1] - 0.05)  # 向前推一点
-        else:
-            return 0.0
-
-    for idx, char in enumerate(llm_chars):
-        if llm_alignment[idx]:
-            s = llm_alignment[idx]["start"]
-        else:
-            s = get_interpolated_start(idx)
-        final_chars.append({"token": char, "start": s})
-
-    # 计算每个字符的 end 时间 (下一个字符的 start 或者 +0.08s)
-    for i in range(len(final_chars)):
-        if i < len(final_chars) - 1:
-            final_chars[i]["end"] = final_chars[i+1]["start"]
-        else:
-            final_chars[i]["end"] = final_chars[i]["start"] + 0.08
-            
-    # Fix the issue where multiple initial characters have 0.0 as start timestamp
-    # If the first few tokens have 0.0, space them out backwards from the first non-zero token
-    first_nonzero_idx = -1
-    for i, char in enumerate(final_chars):
-        if char["start"] > 0.0:
-            first_nonzero_idx = i
-            break
-            
-    if first_nonzero_idx > 0:
-        # Space out backwards from first_nonzero_idx
-        # assuming 0.08s per character
-        base_time = final_chars[first_nonzero_idx]["start"]
-        for i in range(first_nonzero_idx - 1, -1, -1):
-            new_start = max(0.0, base_time - (first_nonzero_idx - i) * 0.08)
-            final_chars[i]["start"] = new_start
-            final_chars[i]["end"] = final_chars[i+1]["start"]
-
+    # ---- 7. 组装输出，end = 下一字符 start，末字符 +CHAR_DURATION ----
+    final_chars = [{"token": char, "start": starts[idx]} for idx, char in enumerate(llm_chars)]
+    for i in range(len(final_chars) - 1):
+        final_chars[i]["end"] = final_chars[i + 1]["start"]
+    final_chars[-1]["end"] = final_chars[-1]["start"] + CHAR_DURATION
     return final_chars
-
-

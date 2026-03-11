@@ -214,6 +214,18 @@ class StreamDecoder:
         if aligned and timestamp_offset != 0.0:
             for seg in aligned:
                 seg['start'] = max(seg['start'] + timestamp_offset, 0.0)
+                seg['end'] = max(seg['end'] + timestamp_offset, 0.0)
+            
+            # 修复：偏移后，多个头部字符可能被 clamp 到 0.0，需要重新均匀分配
+            first_nz = next((i for i, s in enumerate(aligned) if s['start'] > 0.001), -1)
+            if first_nz > 0:
+                base = aligned[first_nz]['start']
+                step = base / (first_nz + 1)
+                for k in range(first_nz):
+                    aligned[k]['start'] = round(step * (k + 1), 4)
+                # 重算 end
+                for k in range(first_nz):
+                    aligned[k]['end'] = aligned[k + 1]['start']
         
         if aligned:
             reporter.print(f"    对齐耗时: {timings.align*1000:.2f}ms")

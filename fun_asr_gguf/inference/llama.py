@@ -375,12 +375,14 @@ def init_llama_lib():
     llama_sampler_accept.restype = None
 
 
-def load_model(model_path: str):
+def load_model(model_path: str, n_gpu_layers: int = -1, use_gpu: bool = True):
     """
     加载 GGUF 模型（自动处理初始化和路径编码）
     
     Args:
         model_path: GGUF 模型文件路径
+        n_gpu_layers: 卸载到 GPU 的层数 (-1 表示全部)
+        use_gpu: 是否启用 GPU (如果为 False，则强制使用 CPU)
         
     Returns:
         model: llama_model 指针
@@ -400,6 +402,17 @@ def load_model(model_path: str):
     # 初始化 backend，载入模型
     init_llama_lib()
     model_params = llama_model_default_params()
+    
+    # GPU 控制逻辑
+    if not use_gpu:
+        # 对应 llama.cpp 的 --device none 效果
+        # 创建一个长度为 1 的 ctypes 数组，存储 NULL (None)
+        # 这会告诉 llama.cpp 不要进行自动设备发现
+        devices = (ctypes.c_void_p * 1)(None)
+        model_params.devices = devices
+    
+    model_params.n_gpu_layers = n_gpu_layers
+
     model = llama_model_load_from_file(
         model_rel.as_posix().encode('utf-8'),
         model_params
@@ -442,8 +455,8 @@ def create_context(model, n_ctx=2048, n_batch=2048, n_ubatch=512, n_seq_max=1,
 
 class LlamaModel:
     """模型的面向对象封装"""
-    def __init__(self, path, n_gpu_layers=-1):
-        self.ptr = load_model(path)
+    def __init__(self, path, n_gpu_layers=-1, use_gpu=1):
+        self.ptr = load_model(path, n_gpu_layers=n_gpu_layers, use_gpu=use_gpu)
             
         self.vocab = llama_model_get_vocab(self.ptr)
         self.n_embd = llama_model_n_embd(self.ptr)

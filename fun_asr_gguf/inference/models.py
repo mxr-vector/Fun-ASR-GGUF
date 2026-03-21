@@ -65,7 +65,7 @@ class Models:
 
         # 3. GGUF LLM Decoder
         vprint("[3/6] 加载 GGUF LLM 解码器...", verbose)
-        self.model = llama.LlamaModel(self.config.decoder_gguf_path)
+        self.model = llama.LlamaModel(self.config.decoder_gguf_path, use_gpu=self.config.vulkan_enable)
         self.vocab = self.model.vocab
         self.eos_token = self.model.eos_token
 

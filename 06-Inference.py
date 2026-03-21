@@ -77,7 +77,8 @@ def main():
         similar_threshold=0.6, 
         max_hotwords=10, 
         enable_ctc=enable_ctc,
-        onnx_provider='cuda', 
+        onnx_provider='cpu', 
+        vulkan_enable=False,
         verbose=verbose,
     )
     engine = FunASREngine(config)
